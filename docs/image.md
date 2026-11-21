@@ -72,6 +72,28 @@ image, the `/usr` and verity partitions and the UKI, which is what
 
 On macOS the build runs in an x86_64 OrbStack machine (`signage-build`).
 
+## Size
+
+`/usr` is erofs, lzma level 6 in 256 KiB clusters (`mkosi.repart/10-usr.conf`),
+and `scripts/trim-image.py` drops what players never use: kernel modules for
+capture cards, InfiniBand, other GPUs, SoC audio, IIO, ISDN/CAN, staging and
+non-Intel/Realtek WiFi (keeping anything a kept module depends on), older
+iwlwifi firmware versions, Intel Bluetooth firmware, non-English
+translations and Firefox's crash reporter. Debian's `/boot/vmlinuz` copy is
+removed so it doesn't sit on the ESP.
+
+| | Before | After |
+|---|---|---|
+| `/usr` partition | 1.3 GB (1217 MiB of files, uncompressed) | 369 MiB (1087 MiB of files) |
+| Stick image, allocated | ~1.4 GB | 434 MB |
+| ESP | 69 MB | 58 MB |
+| `raw.xz` download | 425 MB | 411 MiB |
+| `usr…raw.zst` (update) | 365 MB | 352 MiB |
+
+zstd decompresses faster than lzma, but compressed data doesn't recompress,
+so zstd in erofs made the downloads about 60 MiB bigger; lzma is smaller on
+disk and in the release.
+
 ## Known gaps
 
 - `/etc` is written once at install. A `/usr` update that changes a file in

@@ -11,6 +11,10 @@ chmod -R a+rX /usr/share/signage /usr/lib/firefox-esr/distribution
 ln -sfn /run/signage-kiosk /usr/share/signage/status
 chmod 0644 /etc/pam.d/cage /etc/chrony/conf.d/signage.conf
 
+# Drop modules, firmware, translations and Firefox bits players never use
+# (see the script for what and why).
+python3 "$SRCDIR/scripts/trim-image.py" /
+
 systemd-sysusers
 systemctl enable signage-config.service signage-install.service signage-player.service signage-web.service
 systemctl enable NetworkManager.service chrony.service
