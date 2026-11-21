@@ -85,6 +85,7 @@ def validate(cfg):
     typed("display", "rotation", int, lambda v: v in ROTATIONS, "must be 0, 90, 180 or 270")
     typed("display", "output", str)
     typed("display", "scale", (int, float), lambda v: 0.25 <= v <= 4, "must be 0.25 to 4")
+    typed("player", "demo", bool)
     typed("install", "target", str, lambda v: v == "" or v.startswith("/dev/"), "must be a /dev path")
     typed("install", "countdown", int, lambda v: 0 <= v <= 600, "must be 0 to 600")
 
@@ -254,6 +255,11 @@ def apply_display(cfg):
     write(RUN / "display.json", json.dumps(out, indent=2) + "\n")
 
 
+def apply_player(cfg):
+    p = cfg.get("player", {})
+    write(RUN / "player.json", json.dumps({"demo": bool(p.get("demo", False))}, indent=2) + "\n")
+
+
 def apply(reload=False):
     cfg, src = current_config()
     errs = validate(cfg)
@@ -267,6 +273,7 @@ def apply(reload=False):
     net_changed = apply_network(cfg)
     ntp_changed = apply_ntp(cfg)
     apply_display(cfg)
+    apply_player(cfg)
     status = {
         "source": src,
         "errors": errs,

@@ -34,6 +34,15 @@ plugged in) and chrony sources, and writes `/run/signage/display.json`.
 applies resolution/rotation with `wlr-randr` and starts Firefox ESR in kiosk
 mode. Until the player exists it shows a status page.
 
+**Demo graphic.** With `[player] demo = true` in `config.toml`, the kiosk
+opens `/usr/share/signage/host/` (served on `http://127.0.0.1:8080` by
+`signage-web.service`, since Firefox won't import ES modules over `file://`)
+instead of the plain status page. The host page is a minimal OGraf renderer:
+it loads the manifest named by `?graphic=`, mounts the graphic on a
+transparent full-screen layer and loops play (hold 6 s), stop, pause 2 s, with
+the device status in a corner overlay. The demo graphic is
+`packages/demo-lower-third/`, baked into `/usr/share/signage/packages/`.
+
 **Updates.** `systemd-sysupdate` (from `systemd-container`) with `/usr/lib/sysupdate.d/` pulls new `/usr` + verity + UKI from the
 latest GitHub release into the B slot; the UKI gets 3 boot tries before
 systemd-boot falls back. Not yet tested.

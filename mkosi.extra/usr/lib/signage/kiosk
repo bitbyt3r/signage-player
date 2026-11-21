@@ -5,7 +5,15 @@ set -uo pipefail
 
 DISPLAY_JSON=/run/signage/display.json
 STATUS_DIR=${RUNTIME_DIRECTORY:-/run/signage-kiosk}
-URL=${SIGNAGE_URL:-file://$STATUS_DIR/status.html}
+DEMO_GRAPHIC=/packages/demo-lower-third/demo-lower-third.ograf.json
+if [[ -n ${SIGNAGE_URL:-} ]]; then
+    URL=$SIGNAGE_URL
+elif [[ $(jq -r '.demo // false' /run/signage/player.json 2>/dev/null) == true ]]; then
+    # [player] demo = true: the OGraf host page with the demo lower third.
+    URL="http://127.0.0.1:8080/host/?graphic=$DEMO_GRAPHIC"
+else
+    URL=file://$STATUS_DIR/status.html
+fi
 
 apply_display() {
     [[ -r $DISPLAY_JSON ]] || return 0
@@ -32,13 +40,30 @@ apply_display() {
     done
 }
 
-# Placeholder status page until the player (step 2) replaces it.
+# Device status, as status.json (the host page's corner overlay reads it
+# through signage-web) and as a plain status page for non-demo mode.
 write_status() {
-    local f=$STATUS_DIR/status.html tmp
-    tmp=$(mktemp "$STATUS_DIR/.status.XXXXXX") || return
+    local tmp version addrs clock ntp config display
     . /usr/lib/os-release
-    {
-        cat <<HTML
+    version=${IMAGE_VERSION:-dev}
+    addrs=$(ip -o -4 addr show scope global | awk '{print $2": "$4}' | paste -sd ' ' -)
+    clock=$(date '+%Y-%m-%d %H:%M:%S %Z')
+    # chronyc can't reach chronyd as a non-root user (Debian runs it as
+    # chronyd-restricted, with no command port), so ask the kernel via timedated.
+    case $(timedatectl show -p NTPSynchronized --value 2>/dev/null) in
+        yes) ntp="NTP synced" ;; no) ntp="NTP not synced" ;; *) ntp="" ;;
+    esac
+    config=$(jq -r '.source + (if (.errors|length)>0 then " — ERRORS: " + (.errors|join("; ")) else "" end)' /run/signage/config-status.json 2>/dev/null)
+    display=$(jq -c . "$DISPLAY_JSON" 2>/dev/null)
+
+    tmp=$(mktemp "$STATUS_DIR/.status.XXXXXX") || return
+    jq -n --arg hostname "$(hostname)" --arg version "$version" --arg addresses "$addrs" \
+        --arg clock "$clock" --arg ntp "${ntp:-unknown}" --arg config "$config" --arg display "$display" \
+        '$ARGS.named' >"$tmp"
+    chmod 644 "$tmp"; mv -f "$tmp" "$STATUS_DIR/status.json"
+
+    tmp=$(mktemp "$STATUS_DIR/.status.XXXXXX") || return
+    cat >"$tmp" <<HTML
 <!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="5">
 <title>signage</title>
 <style>
@@ -47,21 +72,24 @@ font:2.2vw/1.5 "DejaVu Sans",sans-serif}
 h1{font-size:4vw;margin:0 0 .5em}dt{color:#8aa0b0}dd{margin:0 0 .6em}code{font-size:1.6vw}
 </style>
 <h1>$(hostname)</h1><dl>
-<dt>Version</dt><dd>${IMAGE_VERSION:-dev}</dd>
-<dt>Addresses</dt><dd>$(ip -o -4 addr show scope global | awk '{print $2": "$4}' | paste -sd ' ' - | sed 's/^$/none/')</dd>
-<dt>Clock</dt><dd>$(date '+%Y-%m-%d %H:%M:%S %Z') ($(chronyc -n tracking 2>/dev/null | awk -F': ' '/Leap status/{print $2}' || echo unknown))</dd>
-<dt>Config</dt><dd><code>$(jq -r '.source + (if (.errors|length)>0 then " — ERRORS: " + (.errors|join("; ")) else "" end)' /run/signage/config-status.json 2>/dev/null)</code></dd>
-<dt>Display</dt><dd><code>$(jq -c . "$DISPLAY_JSON" 2>/dev/null)</code></dd>
+<dt>Version</dt><dd>$version</dd>
+<dt>Addresses</dt><dd>${addrs:-none}</dd>
+<dt>Clock</dt><dd>$clock (${ntp:-unknown})</dd>
+<dt>Config</dt><dd><code>$config</code></dd>
+<dt>Display</dt><dd><code>$display</code></dd>
 </dl>
 HTML
-    } >"$tmp"
-    chmod 644 "$tmp"
-    mv -f "$tmp" "$f"
+    chmod 644 "$tmp"; mv -f "$tmp" "$STATUS_DIR/status.html"
 }
 
 apply_display
 write_status
 ( while sleep 5; do write_status; done ) &
+
+# signage-web is only ordered before us, not waited for; give it a moment.
+if [[ $URL == http://127.0.0.1:8080/* ]]; then
+    for _ in $(seq 60); do curl -fs -o /dev/null http://127.0.0.1:8080/host/ && break; sleep 0.5; done
+fi
 
 # Firefox refuses a --profile directory that does not exist yet.
 mkdir -p "$HOME/firefox"

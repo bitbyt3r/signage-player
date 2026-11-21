@@ -1,0 +1,19 @@
+[Unit]
+Description=Local web server for the signage host page and OGraf packages
+# Firefox won't import ES modules from file://, so the kiosk loads the host
+# page and graphics from here. /usr/share/signage/status links to the
+# kiosk's runtime directory for the status overlay.
+Before=signage-player.service
+
+[Service]
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /usr/share/signage
+DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

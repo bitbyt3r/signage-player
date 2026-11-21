@@ -7,10 +7,12 @@ chmod 0755 /usr/lib/signage /usr/lib/signage/*
 find /usr/lib/systemd/system -name 'signage-*' -exec chmod 0644 {} +
 chmod 0644 /usr/lib/sysusers.d/signage.conf /usr/lib/tmpfiles.d/signage.conf /usr/lib/sysupdate.d/*.transfer
 chmod -R a+rX /usr/share/signage /usr/lib/firefox-esr/distribution
+# The host page reads the kiosk's status.json through signage-web.
+ln -sfn /run/signage-kiosk /usr/share/signage/status
 chmod 0644 /etc/pam.d/cage /etc/chrony/conf.d/signage.conf
 
 systemd-sysusers
-systemctl enable signage-config.service signage-install.service signage-player.service
+systemctl enable signage-config.service signage-install.service signage-player.service signage-web.service
 systemctl enable NetworkManager.service chrony.service
 systemctl set-default multi-user.target
 # The kiosk owns tty1; the installer prints there too.

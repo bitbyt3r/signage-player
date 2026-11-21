@@ -1,6 +1,7 @@
 [Unit]
 Description=Signage kiosk (cage + Firefox)
-After=signage-config.service systemd-user-sessions.service
+After=signage-config.service systemd-user-sessions.service signage-web.service
+Wants=signage-web.service
 Conflicts=getty@tty1.service
 After=getty@tty1.service
 ConditionPathExists=!/run/signage/installer

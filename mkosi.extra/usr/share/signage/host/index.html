@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>signage host</title>
+<!--
+  Minimal OGraf host (a preview of the player). Loads the graphic whose
+  manifest is given by ?graphic=URL, mounts it on a full-screen transparent
+  layer and loops it: play, hold, stop, pause. A small corner overlay shows
+  the device status that the kiosk writes to /status/status.json.
+
+  Parameters: graphic=<manifest URL>  data=<JSON for load()>
+              hold=<ms, default 6000>  gap=<ms, default 2000>  status=0 hides the overlay
+-->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; cursor: none; }
+  body { background: radial-gradient(ellipse at 30% 20%, #2a3542 0%, #12171d 60%, #0b0e12 100%);
+         font-family: "DejaVu Sans", sans-serif; color: #e8eef2; }
+  .layer { position: absolute; inset: 0; background: transparent; }
+  #status { position: absolute; top: 1.2vw; right: 1.2vw; z-index: 10; max-width: 34vw;
+            background: rgba(0, 0, 0, 0.45); border-radius: 0.5vw; padding: 0.8vw 1.1vw;
+            font-size: 0.95vw; line-height: 1.45; }
+  #status b { font-size: 1.15vw; }
+  #status .k { color: #8aa0b0; }
+  #status .err { color: #ff8a80; }
+</style>
+<div id="layer-main" class="layer"></div>
+<div id="status"></div>
+<script type="module" src="host.mjs"></script>

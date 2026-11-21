@@ -1,0 +1,32 @@
+{
+  "$schema": "https://ograf.ebu.io/v1/specification/json-schemas/graphics/schema.json",
+  "id": "magfest-demo-lower-third",
+  "version": "1.0.0",
+  "name": "Demo lower third",
+  "description": "A name and title bar that slides in from the left and out again.",
+  "author": {"name": "MAGFest signage"},
+  "main": "graphic.mjs",
+  "supportsRealTime": true,
+  "supportsNonRealTime": false,
+  "stepCount": 1,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {"type": "string", "title": "Name", "default": "MAGFest Signage"},
+      "title": {"type": "string", "title": "Title", "default": "Player demo"},
+      "accent": {"type": "string", "title": "Accent colour", "default": "#e4405f"}
+    }
+  },
+  "customActions": [
+    {
+      "id": "highlight",
+      "name": "Highlight",
+      "description": "Pulse the accent bar once.",
+      "schema": null
+    }
+  ],
+  "actionDurations": [
+    {"type": "playAction", "duration": 900},
+    {"type": "stopAction", "duration": 600}
+  ]
+}
