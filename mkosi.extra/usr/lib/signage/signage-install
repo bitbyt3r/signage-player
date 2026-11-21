@@ -52,6 +52,54 @@ umount "$CFG_MNT"
 cfg() { /usr/lib/signage/signage-config --get "$1" "$STAGE/state/config.toml"; }
 TARGET=$(cfg install.target || true)
 COUNTDOWN=$(cfg install.countdown || echo 15)
+MOK_PASSWORD=$(cfg install.mok_password || echo signage)
+
+# BIOS probe (Lenovo ThinkCentre/ThinkPad): dump every WMI BIOS setting and
+# the BIOS password state to bios-<serial>.txt on the stick's SIGNCFG
+# partition. Read-only on the BIOS side; nothing is changed. Runs before the
+# countdown so booting the stick and cancelling still leaves a report.
+bios_report() {
+    modprobe think-lmi 2>/dev/null || true
+    local fa=/sys/class/firmware-attributes/thinklmi
+    [[ -d $fa ]] || return 0
+    local serial out a f
+    serial=$(tr -cd 'A-Za-z0-9_-' </sys/class/dmi/id/product_serial 2>/dev/null)
+    out=$STAGE/bios-${serial:-unknown}.txt
+    {
+        echo "# BIOS settings read through think-lmi by the signage installer"
+        echo "# $(. /usr/lib/os-release; echo "$IMAGE_VERSION"), $(date -u +%FT%TZ)"
+        for f in sys_vendor product_name product_version product_serial bios_vendor bios_version bios_date; do
+            printf '%-16s %s\n' "$f" "$(cat /sys/class/dmi/id/$f 2>/dev/null)"
+        done
+        echo
+        echo "## authentication"
+        for a in "$fa"/authentication/*/; do
+            [[ -d $a ]] || continue
+            printf '%s:' "$(basename "$a")"
+            for f in is_enabled role mechanism; do
+                [[ -r $a/$f ]] && printf ' %s=%s' "$f" "$(cat "$a/$f" 2>/dev/null)"
+            done
+            echo
+        done
+        echo
+        echo "## attributes (name = current_value  [possible_values])"
+        for a in "$fa"/attributes/*/; do
+            [[ -d $a ]] || continue
+            printf '%s = %s' "$(basename "$a")" "$(cat "$a/current_value" 2>/dev/null)"
+            [[ -r $a/possible_values ]] && printf '  [%s]' "$(cat "$a/possible_values" 2>/dev/null)"
+            echo
+        done
+    } >"$out" 2>/dev/null
+    # SIGNCFG is read-only everywhere else; mount it writable just for this.
+    if mount -o rw "$SRC_CFG" "$CFG_MNT"; then
+        cp "$out" "$CFG_MNT/" && sync
+        umount "$CFG_MNT"
+        say "BIOS settings saved to $(basename "$out") on the stick."
+    else
+        say "Could not write the BIOS report to the stick (SIGNCFG)."
+    fi
+}
+bios_report || say "BIOS report failed (continuing)."
 
 if [[ -z $TARGET ]]; then
     mapfile -t CANDIDATES < <(
@@ -139,17 +187,57 @@ say "Writing partitions..."
 systemd-repart --dry-run=no --empty=force --definitions="$DEFS" "$TARGET"
 udevadm settle
 
+# Secure Boot: queue our certificates for MOK enrollment unless shim already
+# trusts them (for example after "Enroll key from disk" in MokManager, which
+# is how a machine with Secure Boot already on gets to boot this stick).
+# MokManager asks to confirm on the next boot, using install.mok_password.
+mok_enroll() {
+    command -v mokutil >/dev/null && [[ -d /sys/firmware/efi ]] || return 0
+    local c pending=()
+    for c in /usr/share/signage/mok/*.cer; do
+        [[ -f $c ]] || continue
+        # mokutil exits non-zero for an enrolled key, so test its message,
+        # not a pipeline (pipefail would make that look "not enrolled").
+        local msg
+        msg=$(mokutil --test-key "$c" 2>&1 || true)
+        if [[ $msg == *already* ]]; then
+            say "  $(basename "$c"): already trusted"
+        else
+            pending+=("$c")
+        fi
+    done
+    [[ ${#pending[@]} -gt 0 ]] || return 0
+    local hash=$STAGE/mok.hash
+    mokutil --generate-hash="$MOK_PASSWORD" >"$hash"
+    mokutil --hash-file "$hash" --import "${pending[@]}"
+    rm -f "$hash"
+    MOK_QUEUED=1
+    say "  queued for enrollment: $(printf '%s ' "${pending[@]##*/}")"
+}
+MOK_QUEUED=
+say "Secure Boot: $(mokutil --sb-state 2>/dev/null | head -n1 || echo unknown)"
+mok_enroll || say "  mokutil failed; enroll the certificate from disk in MokManager instead (docs/secure-boot.md)."
+
 say "Adding firmware boot entry..."
 while read -r num; do efibootmgr -q -b "$num" -B; done < <(efibootmgr | sed -n 's/^Boot\([0-9A-F]\{4\}\)\*\? Signage.*/\1/p')
 esp_num=$(lsblk -lnpo NAME,PARTTYPE "$TARGET" | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print $1; exit}' | grep -o '[0-9]*$')
-efibootmgr -q -c -d "$TARGET" -p "$esp_num" -L "Signage" -l '\EFI\systemd\systemd-bootx64.efi'
+# shim (Microsoft-signed) is BOOTX64.EFI; it chain-loads systemd-boot from
+# grubx64.EFI next to it.
+efibootmgr -q -c -d "$TARGET" -p "$esp_num" -L "Signage" -l '\EFI\BOOT\BOOTX64.EFI'
 
 new=$(efibootmgr | sed -n 's/^Boot\([0-9A-F]\{4\}\)\*\? Signage.*/\1/p' | head -n1)
 [[ -n $new ]] && efibootmgr -q -n "$new"
 
 sync
 say ""
-say "Installed to $TARGET. Rebooting into it in 10 s."
+WAIT=10; [[ -n $MOK_QUEUED ]] && WAIT=30
+say "Installed to $TARGET. Rebooting into it in $WAIT s."
 say "You can remove the USB stick at any time now."
-sleep 10
+if [[ -n $MOK_QUEUED ]]; then
+    say ""
+    say "ON THE NEXT BOOT a blue MokManager screen asks to enroll the signing key."
+    say "Press a key within 10 s, then: Enroll MOK > Continue > Yes >"
+    say "password (install.mok_password in config.toml) > Reboot."
+fi
+sleep "$WAIT"
 systemctl reboot

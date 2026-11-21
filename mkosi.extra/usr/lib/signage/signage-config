@@ -88,6 +88,9 @@ def validate(cfg):
     typed("player", "demo", bool)
     typed("install", "target", str, lambda v: v == "" or v.startswith("/dev/"), "must be a /dev path")
     typed("install", "countdown", int, lambda v: 0 <= v <= 600, "must be 0 to 600")
+    # MokManager asks for this once, on the first boot after install, to
+    # confirm enrolling the signing certificate. mokutil allows 1-256 chars.
+    typed("install", "mok_password", str, lambda v: 1 <= len(v) <= 256, "must be 1 to 256 characters")
 
     wifi = cfg.get("network", {}).get("wifi", [])
     if not isinstance(wifi, list):

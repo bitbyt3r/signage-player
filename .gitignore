@@ -4,3 +4,6 @@ mkosi.tools/
 mkosi.workspace/
 *.raw
 *.efi
+mkosi.key
+mkosi.crt
+mkosi.signing/

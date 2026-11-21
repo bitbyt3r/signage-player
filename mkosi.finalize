@@ -7,6 +7,15 @@
 set -euo pipefail
 R="$BUILDROOT"
 
+# mkosi 25.3 copies Debian's MokManager as EFI/BOOT/mmx64.efi.signed, but
+# shim looks for mmx64.efi next to itself. Without it shim can't start
+# MokManager to enroll our key.
+B=$R/efi/EFI/BOOT
+if [[ -f $B/mmx64.efi.signed ]]; then
+    mv "$B/mmx64.efi.signed" "$B/mmx64.efi"
+fi
+[[ -f $B/mmx64.efi ]] || { echo "mkosi.finalize: MokManager missing from $B" >&2; exit 1; }
+
 echo uninitialized >"$R/etc/machine-id"
 rm -f "$R/etc/.updated" "$R/var/.updated"
 

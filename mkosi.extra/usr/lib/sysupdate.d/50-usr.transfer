@@ -2,6 +2,9 @@
 # player takes; for now players follow the latest GitHub release.
 [Transfer]
 ProtectVersion=%A
+# SHA256SUMS must carry a valid SHA256SUMS.gpg from the release key
+# (/usr/lib/systemd/import-pubring.gpg). CI signs it.
+Verify=yes
 
 [Source]
 Type=url-file

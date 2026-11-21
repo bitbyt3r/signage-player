@@ -6,6 +6,9 @@
 #   scripts/qemu-test.sh [options] [image.raw]
 #
 #   --boot-disk     boot the NVMe disk from the last run (no stick, no reset)
+#   --secure-boot   OVMF with Secure Boot on and Microsoft's keys enrolled,
+#                   like a stock PC (needs the vars from a --secure-boot run
+#                   when combined with --boot-disk)
 #   --headless      run in the background; serial console and QEMU monitor on
 #                   unix sockets in $WORK (default: serial console on stdio,
 #                   Ctrl-A X quits, Ctrl-A C toggles the monitor)
@@ -25,11 +28,12 @@ if [[ $(uname) == Darwin ]]; then
 fi
 
 WORK=${WORK:-/var/tmp/signage-qemu}
-BOOT_DISK= HEADLESS=
+BOOT_DISK= HEADLESS= SECURE=
 while [[ $# -gt 0 ]]; do
     case $1 in
         --boot-disk) BOOT_DISK=1 ;;
         --headless) HEADLESS=1 ;;
+        --secure-boot) SECURE=1 ;;
         -*) echo "unknown option $1" >&2; exit 2 ;;
         *) break ;;
     esac
@@ -38,6 +42,14 @@ done
 
 OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.fd
 OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.fd
+MACHINE=(-machine q35)
+if [[ -n $SECURE ]]; then
+    # secboot firmware needs SMM so the variable store can't be written
+    # around it; .ms vars come with Microsoft's KEK and db (signs shim).
+    OVMF_CODE=/usr/share/OVMF/OVMF_CODE_4M.secboot.fd
+    OVMF_VARS=/usr/share/OVMF/OVMF_VARS_4M.ms.fd
+    MACHINE=(-machine q35,smm=on -global driver=cfi.pflash01,property=secure,value=on)
+fi
 [[ -f $OVMF_CODE ]] || { echo "Install OVMF (apt install ovmf)." >&2; exit 1; }
 mkdir -p "$WORK"
 
@@ -59,7 +71,7 @@ else
 fi
 
 ARGS=(
-    -machine q35 -accel tcg,thread=multi -cpu max -smp 4 -m 4096
+    "${MACHINE[@]}" -accel tcg,thread=multi -cpu max -smp 4 -m 4096
     -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE"
     -drive "if=pflash,format=raw,file=$WORK/vars.fd"
     -device qemu-xhci,id=xhci "${STICK[@]}"

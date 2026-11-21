@@ -6,6 +6,7 @@ from schedule.magfest.net, managed from a central dashboard.
 - [`docs/image.md`](docs/image.md): the OS image, install stick and config file
 - [`docs/install-walkthrough.md`](docs/install-walkthrough.md): screenshots and timeline
   of an install, from the stick to the first boot and the demo graphic
+- [`docs/secure-boot.md`](docs/secure-boot.md): Secure Boot chain, keys, per-machine setup ([test run](docs/secure-boot-test.md))
 - `mkosi.conf`, `mkosi.repart/`, `mkosi.extra/`: the image
 - `scripts/build.sh`: build locally (macOS: in an OrbStack machine)
 - `scripts/qemu-test.sh`: boot the image in QEMU as a USB stick with an empty

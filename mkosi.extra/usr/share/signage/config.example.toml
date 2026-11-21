@@ -49,3 +49,8 @@ demo = false
 # target = "/dev/nvme0n1"
 # Seconds to wait on screen before wiping the target disk.
 countdown = 15
+# Secure Boot: the installer queues the image's signing certificate for
+# enrollment (mokutil). On the first boot after install, the blue MokManager
+# screen appears: press a key, choose "Enroll MOK", "Continue", "Yes", type
+# this password, then "Reboot". See docs/secure-boot.md.
+mok_password = "signage"

@@ -19,6 +19,16 @@ cd "$(dirname "$0")/.."
 VERSION=${VERSION:-$(cat mkosi.version).$(date -u +%y%m%d%H%M)}
 ARGS=(--image-version="$VERSION" --workspace-dir=/var/tmp/mkosi-ws --cache-dir=/var/cache/mkosi "$@" -f build)
 
+# Secure Boot signing key: mkosi.key/mkosi.crt (gitignored). CI writes the
+# production MOK there from the `release` environment; local builds get a
+# dev key the first time. Machines installed from a dev-key build enroll
+# that dev cert too (see docs/secure-boot.md).
+dev_key() {
+    [[ -f mkosi.key && -f mkosi.crt ]] && return
+    echo "No mkosi.key/mkosi.crt: generating a dev Secure Boot key." >&2
+    "$@"
+}
+
 if [[ $(uname) == Darwin ]]; then
     command -v orb >/dev/null || { echo "Install OrbStack (https://orbstack.dev) first." >&2; exit 1; }
     M=signage-build
@@ -28,13 +38,15 @@ if [[ $(uname) == Darwin ]]; then
     # mkosi 25.3's default tools tree asks for grub-pc-bin, which doesn't
     # exist on arm64, so use the machine's own tools instead.
     TOOLS="mkosi apt dpkg debian-archive-keyring erofs-utils mtools dosfstools e2fsprogs"
-    TOOLS+=" systemd-repart systemd-ukify python3-pefile cryptsetup-bin zstd"
+    TOOLS+=" systemd-repart systemd-ukify python3-pefile cryptsetup-bin zstd openssl sbsigntool"
     orb -m "$M" -u root bash -c "dpkg -s $TOOLS >/dev/null 2>&1 || { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y $TOOLS; }"
     ARGS=(--tools-tree= "${ARGS[@]}")
     orb -m "$M" -u root mkdir -p /var/tmp/mkosi-ws /var/cache/mkosi
+    dev_key orb -m "$M" -u root bash -c "cd $(printf %q "$PWD") && mkosi --tools-tree= --genkey-common-name='Signage dev key (not for production)' --genkey-valid-days=3650 genkey"
     # macOS ships bash 3.2, which has no ${var@Q}; quote with printf %q.
     exec orb -m "$M" -u root bash -c "cd $(printf %q "$PWD") && mkosi $(printf '%q ' "${ARGS[@]}")"
 fi
 
 sudo mkdir -p /var/tmp/mkosi-ws /var/cache/mkosi
+dev_key sudo mkosi --genkey-common-name='Signage dev key (not for production)' --genkey-valid-days=3650 genkey
 exec sudo mkosi "${ARGS[@]}"

@@ -1,0 +1,23 @@
+#!/bin/bash
+# Runs outside the image (with the build tools) after mkosi.postinst.chroot.
+# Ships the certificate this build is signed with, in DER form, so the
+# installer can queue it for MOK enrollment and MokManager can enroll it from
+# the stick's ESP. The committed production and backup certificates are in
+# mkosi.extra already; this only adds the build's own cert when it is a
+# different one (a dev key from `mkosi genkey`).
+set -euo pipefail
+
+crt=$SRCDIR/mkosi.crt
+[[ -f $crt ]] || { echo "mkosi.postinst: $crt missing (scripts/build.sh creates a dev key)" >&2; exit 1; }
+
+fpr() { openssl x509 -in "$1" -inform "$2" -noout -fingerprint -sha256; }
+mine=$(fpr "$crt" PEM)
+for c in "$BUILDROOT"/usr/share/signage/mok/*.cer; do
+    [[ -f $c ]] || continue
+    [[ $(fpr "$c" DER) == "$mine" ]] && exit 0
+done
+
+mkdir -p "$BUILDROOT/usr/share/signage/mok" "$BUILDROOT/efi/signage-mok"
+openssl x509 -in "$crt" -outform DER -out "$BUILDROOT/usr/share/signage/mok/build-signing.cer"
+cp "$BUILDROOT/usr/share/signage/mok/build-signing.cer" "$BUILDROOT/efi/signage-mok/"
+chmod 0644 "$BUILDROOT/usr/share/signage/mok/build-signing.cer"

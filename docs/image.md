@@ -6,7 +6,7 @@ One mkosi image (Debian trixie, x86_64) does two jobs.
 
 | Partition | What |
 |---|---|
-| ESP (FAT, 512M) | systemd-boot and the UKI |
+| ESP (FAT, 512M) | shim, systemd-boot, MokManager, the signed UKI and our MOK certificates ([secure-boot.md](secure-boot.md)) |
 | `signage_usr_<v>` (erofs) + `signage_verity_<v>` | read-only `/usr`, checked by dm-verity (`usrhash=` is on the UKI's command line) |
 | `root` (ext4, 1G) | `/etc` from the image, empty `/var` |
 | `SIGNCFG` (FAT32, 256M) | `config.toml` and a README; edit it on any computer |
@@ -22,8 +22,9 @@ picks the internal disk, counts down (any key cancels), then writes:
 | usr B 4G + verity B 128M | empty (`_empty`), for systemd-sysupdate |
 | root (ext4, rest of disk) | `/etc` from `/usr/share/factory/etc`, `config.toml` in `/var/lib/signage/` |
 
-It adds a "Signage" firmware boot entry, makes it first and the next boot,
-and reboots. The stick can be pulled at any point after that.
+It queues our Secure Boot certificates with `mokutil` (confirmed in
+MokManager on the next boot), adds a "Signage" firmware boot entry pointing
+at shim, makes it first and the next boot, and reboots. The stick can be pulled at any point after that.
 
 **Installed player.** `signage-config.service` reads
 `/var/lib/signage/config.toml` (plus `overrides.toml`, which the dashboard
@@ -54,6 +55,7 @@ scripts/build.sh                    # mkosi.output/signage_<version>.raw
 scripts/build.sh --profile=debug    # + serial console, root shell on tty2/ttyS0
 scripts/qemu-test.sh                # QEMU: image as USB stick + empty NVMe
 scripts/qemu-test.sh --boot-disk    # boot the installed NVMe disk again
+scripts/qemu-test.sh --secure-boot  # OVMF with Secure Boot on and Microsoft keys
 scripts/utm-test.sh                 # same in UTM (AppleScript; less tested)
 ```
 
