@@ -1,0 +1,826 @@
+[+   6.7] BdsDxe: loading Boot0001 "UEFI QEMU QEMU USB HARDDRIVE 1-0000:00:02.0-1" from PciRoot(0x0)/Pci(0x2,0x0)/USB(0x0,0x0)
+[+   7.9] BdsDxe: starting Boot0001 "UEFI QEMU QEMU USB HARDDRIVE 1-0000:00:02.0-1" from PciRoot(0x0)/Pci(0x2,0x0)/USB(0x0,0x0)
+[+  24.6] Booting initrd of Debian GNU/Linux 13 (trixie).
+[+  25.5] [  OK  ] Created slice system-modprobe.slice - Slice /system/modprobe.
+[+  25.5] [  OK  ] Created slice system-systemd\x2dpc…lice - Slice /system/systemd-pcrfs.
+[+  25.5] [  OK  ] Created slice system-systemd\x2dve… - Verity Protection Service Slice.
+[+  25.5] [  OK  ] Started systemd-ask-password-conso…equests to Console Directory Watch.
+[+  25.5] [  OK  ] Set up automount proc-sys-fs-binfm…ormats File System Automount Point.
+[+  25.6]          Expecting device dev-disk-by\x2dpa…49ce-b8b5-aa72-24fc-09a603b54774...
+[+  25.6]          Expecting device dev-disk-by\x2dpa…a562-d754-3ae1-b04e-b43e4cae00b6...
+[+  25.6]          Expecting device dev-gpt\x2dauto\x…root.device - /dev/gpt-auto-root...
+[+  25.6]          Expecting device dev-mapper-usr.device - /dev/mapper/usr...
+[+  25.6] [  OK  ] Reached target integritysetup.targ… Local Integrity Protected Volumes.
+[+  25.6] [  OK  ] Reached target paths.target - Path Units.
+[+  25.6] [  OK  ] Reached target remote-cryptsetup.target - Remote Encrypted Volumes.
+[+  25.6] [  OK  ] Reached target remote-veritysetup.… - Remote Verity Protected Volumes.
+[+  25.6] [  OK  ] Reached target slices.target - Slice Units.
+[+  25.6] [  OK  ] Reached target swap.target - Swaps.
+[+  25.6] [  OK  ] Listening on systemd-creds.socket - Credential Encryption/Decryption.
+[+  25.6] [  OK  ] Listening on systemd-initctl.socke…- initctl Compatibility Named Pipe.
+[+  25.6] [  OK  ] Listening on systemd-journald-audit.socket - Journal Audit Socket.
+[+  25.6] [  OK  ] Listening on systemd-journald-dev-…socket - Journal Socket (/dev/log).
+[+  25.6] [  OK  ] Listening on systemd-journald.socket - Journal Sockets.
+[+  25.6] [  OK  ] Listening on systemd-networkd.socket - Network Service Netlink Socket.
+[+  25.6] [  OK  ] Listening on systemd-udevd-control.socket - udev Control Socket.
+[+  25.6] [  OK  ] Listening on systemd-udevd-kernel.socket - udev Kernel Socket.
+[+  25.6]          Mounting dev-hugepages.mount - Huge Pages File System...
+[+  25.6]          Mounting dev-mqueue.mount - POSIX Message Queue File System...
+[+  25.7]          Mounting run-lock.mount - Legacy Locks Directory /run/lock...
+[+  25.7]          Mounting sys-kernel-debug.mount - Kernel Debug File System...
+[+  25.7]          Mounting sys-kernel-tracing.mount - Kernel Trace File System...
+[+  25.7]          Mounting tmp.mount - Temporary Directory /tmp...
+[+  25.8]          Starting kmod-static-nodes.service…eate List of Static Device Nodes...
+[+  25.8]          Starting modprobe@configfs.service - Load Kernel Module configfs...
+[+  25.8]          Starting modprobe@dm_mod.service - Load Kernel Module dm_mod...
+[+  25.8]          Starting modprobe@efi_pstore.servi… - Load Kernel Module efi_pstore...
+[+  25.8]          Starting modprobe@fuse.service - Load Kernel Module fuse...
+[+  25.9]          Starting modprobe@loop.service - Load Kernel Module loop...
+[+  25.9]          Starting systemd-journald.service - Journal Service...
+[+  26.0]          Starting systemd-modules-load.service - Load Kernel Modules...
+[+  26.0]          Starting systemd-network-generator…k Units from Kernel Command Line...
+[+  26.0] [  OK  ] Reached target cryptsetup.target - Local Encrypted Volumes.
+[+  26.0]          Starting systemd-udev-load-credent…Load udev Rules from Credentials...
+[+  26.0]          Starting systemd-udev-trigger.service - Coldplug All udev Devices...
+[+  26.1] [  OK  ] Mounted dev-hugepages.mount - Huge Pages File System.
+[+  26.1] [  OK  ] Mounted dev-mqueue.mount - POSIX Message Queue File System.
+[+  26.1] [  OK  ] Mounted run-lock.mount - Legacy Locks Directory /run/lock.
+[+  26.1] [  OK  ] Mounted sys-kernel-debug.mount - Kernel Debug File System.
+[+  26.1] [  OK  ] Mounted sys-kernel-tracing.mount - Kernel Trace File System.
+[+  26.1] [  OK  ] Mounted tmp.mount - Temporary Directory /tmp.
+[+  26.1] [  OK  ] Finished kmod-static-nodes.service…Create List of Static Device Nodes.
+[+  26.2] [  OK  ] Finished modprobe@configfs.service - Load Kernel Module configfs.
+[+  26.2] [  OK  ] Finished modprobe@dm_mod.service - Load Kernel Module dm_mod.
+[+  26.2] [  OK  ] Finished modprobe@efi_pstore.service - Load Kernel Module efi_pstore.
+[+  26.2] [  OK  ] Finished modprobe@fuse.service - Load Kernel Module fuse.
+[+  26.2] [  OK  ] Finished modprobe@loop.service - Load Kernel Module loop.
+[+  26.2] [  OK  ] Finished systemd-modules-load.service - Load Kernel Modules.
+[+  26.2]          Mounting sys-fs-fuse-connections.mount - FUSE Control File System...
+[+  26.2]          Mounting sys-kernel-config.mount - Kernel Configuration File System...
+[+  26.3]          Starting systemd-sysctl.service - Apply Kernel Variables...
+[+  26.3]          Starting systemd-tmpfiles-setup-de… Device Nodes in /dev gracefully...
+[+  26.3] [  OK  ] Finished systemd-network-generator…ork Units from Kernel Command Line.
+[+  26.3] [  OK  ] Finished systemd-udev-load-credent…- Load udev Rules from Credentials.
+[+  26.3] [  OK  ] Reached target network-pre.target - Preparation for Network.
+[+  26.4] [  OK  ] Mounted sys-fs-fuse-connections.mount - FUSE Control File System.
+[+  26.4] [  OK  ] Mounted sys-kernel-config.mount - Kernel Configuration File System.
+[+  26.4] [  OK  ] Finished systemd-sysctl.service - Apply Kernel Variables.
+[+  26.4] [  OK  ] Finished systemd-tmpfiles-setup-de…ic Device Nodes in /dev gracefully.
+[+  26.5]          Starting systemd-tmpfiles-setup-de…eate Static Device Nodes in /dev...
+[+  26.5] [  OK  ] Started systemd-journald.service - Journal Service.
+[+  26.6] [  OK  ] Finished systemd-tmpfiles-setup-de…Create Static Device Nodes in /dev.
+[+  26.6] [  OK  ] Reached target local-fs-pre.target…Preparation for Local File Systems.
+[+  26.6] [  OK  ] Reached target local-fs.target - Local File Systems.
+[+  26.6] [  OK  ] Listening on systemd-sysext.socket… System Extension Image Management.
+[+  26.6]          Starting systemd-tmpfiles-setup.se…ate System Files and Directories...
+[+  26.7]          Starting systemd-udevd.service - R…ager for Device Events and Files...
+[+  26.9] [  OK  ] Finished systemd-tmpfiles-setup.se…reate System Files and Directories.
+[+  26.9] [  OK  ] Finished systemd-udev-trigger.service - Coldplug All udev Devices.
+[+  27.0] [  OK  ] Started systemd-udevd.service - Ru…anager for Device Events and Files.
+[+  27.8]          Starting systemd-networkd.service - Network Configuration...
+[+  29.1] [  OK  ] Started systemd-networkd.service - Network Configuration.
+[+  29.1] [  OK  ] Reached target network.target - Network.
+[+  30.5] [  OK  ] Found device dev-disk-by\x2dpartuu…SK signage_verity_0.1.0.2611211835.
+[+  30.7] [  OK  ] Found device dev-gpt\x2dauto\x2droot.device - QEMU_HARDDISK root.
+[+  30.8] [  OK  ] Found device dev-disk-by\x2dpartuu…DDISK signage_usr_0.1.0.2611211835.
+[+  31.0] [  OK  ] Reached target initrd-root-device.target - Initrd Root Device.
+[+  31.0]          Mounting sysroot.mount - Root Partition...
+[+  31.0]          Starting systemd-veritysetup@usr.s…tegrity Protection Setup for usr...
+[+  31.6] [  OK  ] Found device dev-mapper-usr.device - /dev/mapper/usr.
+[+  31.6] [  OK  ] Finished systemd-veritysetup@usr.s…Integrity Protection Setup for usr.
+[+  31.6] [  OK  ] Reached target blockdev@dev-mapper…ce Preparation for /dev/mapper/usr.
+[+  31.6] [  OK  ] Reached target veritysetup.target - Local Verity Protected Volumes.
+[+  31.6] [  OK  ] Reached target sysinit.target - System Initialization.
+[+  31.6] [  OK  ] Reached target timers.target - Timer Units.
+[+  31.6] [  OK  ] Listening on systemd-hostnamed.socket - Hostname Service Socket.
+[+  31.6] [  OK  ] Reached target sockets.target - Socket Units.
+[+  31.6]          Starting systemd-fsck-usr.service … System Check on /dev/mapper/usr...
+[+  31.6] [  OK  ] Reached target basic.target - Basic System.
+[+  32.0] [  OK  ] Mounted sysroot.mount - Root Partition.
+[+  33.7] [  OK  ] Finished systemd-fsck-usr.service …le System Check on /dev/mapper/usr.
+[+  33.7]          Mounting sysusr-usr.mount - /sysusr/usr...
+[+  34.0] [  OK  ] Mounted sysusr-usr.mount - /sysusr/usr.
+[+  34.0] [  OK  ] Reached target initrd-usr-fs.target - Initrd /usr File System.
+[+  34.0]          Mounting sysroot-usr.mount - /sysroot/usr...
+[+  34.0] [  OK  ] Reached target initrd-root-fs.target - Initrd Root File System.
+[+  34.0]          Starting initrd-parse-etc.service …ints Configured in the Real Root...
+[+  34.1] [  OK  ] Mounted sysroot-usr.mount - /sysroot/usr.
+[+  34.3] [  OK  ] Finished initrd-parse-etc.service …points Configured in the Real Root.
+[+  34.3] [  OK  ] Reached target initrd-fs.target - Initrd File Systems.
+[+  34.3] [  OK  ] Reached target initrd.target - Initrd Default Target.
+[+  34.3]          Starting initrd-cleanup.service - …ing Up and Shutting Down Daemons...
+[+  34.4] [  OK  ] Stopped target blockdev@dev-mapper…ce Preparation for /dev/mapper/usr.
+[+  34.4] [  OK  ] Stopped target initrd.target - Initrd Default Target.
+[+  34.4] [  OK  ] Stopped target basic.target - Basic System.
+[+  34.5] [  OK  ] Stopped target initrd-root-device.target - Initrd Root Device.
+[+  34.5] [  OK  ] Stopped target initrd-usr-fs.target - Initrd /usr File System.
+[+  34.5] [  OK  ] Stopped target network.target - Network.
+[+  34.5] [  OK  ] Stopped target paths.target - Path Units.
+[+  34.5] [  OK  ] Stopped target remote-cryptsetup.target - Remote Encrypted Volumes.
+[+  34.5] [  OK  ] Stopped target remote-veritysetup.… - Remote Verity Protected Volumes.
+[+  34.5] [  OK  ] Stopped target slices.target - Slice Units.
+[+  34.5] [  OK  ] Stopped target sockets.target - Socket Units.
+[+  34.5] [  OK  ] Stopped target timers.target - Timer Units.
+[+  34.5] [  OK  ] Closed systemd-creds.socket - Credential Encryption/Decryption.
+[+  34.5] [  OK  ] Closed systemd-hostnamed.socket - Hostname Service Socket.
+[+  34.5] [  OK  ] Stopped target sysinit.target - System Initialization.
+[+  34.5] [  OK  ] Stopped target cryptsetup.target - Local Encrypted Volumes.
+[+  34.5] [  OK  ] Stopped systemd-ask-password-conso…equests to Console Directory Watch.
+[+  34.5] [  OK  ] Stopped target integritysetup.targ… Local Integrity Protected Volumes.
+[+  34.5] [  OK  ] Stopped target swap.target - Swaps.
+[+  34.5] [  OK  ] Stopped target veritysetup.target - Local Verity Protected Volumes.
+[+  34.5] [  OK  ] Closed systemd-initctl.socket - initctl Compatibility Named Pipe.
+[+  34.5] [  OK  ] Closed systemd-sysext.socket - System Extension Image Management.
+[+  34.5]          Starting modprobe@dm_mod.service - Load Kernel Module dm_mod...
+[+  34.5]          Starting modprobe@loop.service - Load Kernel Module loop...
+[+  34.5]          Stopping systemd-networkd.service - Network Configuration...
+[+  34.5] [  OK  ] Stopped systemd-tmpfiles-setup.ser…reate System Files and Directories.
+[+  34.5] [  OK  ] Stopped target local-fs.target - Local File Systems.
+[+  34.5] [  OK  ] Stopped target local-fs-pre.target…Preparation for Local File Systems.
+[+  34.5] [  OK  ] Stopped systemd-udev-trigger.service - Coldplug All udev Devices.
+[+  34.6] [  OK  ] Stopped systemd-networkd.service - Network Configuration.
+[+  34.6] [  OK  ] Finished initrd-cleanup.service - …aning Up and Shutting Down Daemons.
+[+  34.6] [  OK  ] Finished modprobe@dm_mod.service - Load Kernel Module dm_mod.
+[+  34.6] [  OK  ] Finished modprobe@loop.service - Load Kernel Module loop.
+[+  34.6] [  OK  ] Stopped target network-pre.target - Preparation for Network.
+[+  34.6] [  OK  ] Closed systemd-networkd.socket - Network Service Netlink Socket.
+[+  34.6] [  OK  ] Stopped systemd-sysctl.service - Apply Kernel Variables.
+[+  34.6] [  OK  ] Stopped systemd-modules-load.service - Load Kernel Modules.
+[+  34.6]          Stopping systemd-udevd.service - R…ager for Device Events and Files...
+[+  34.7] [  OK  ] Stopped systemd-udevd.service - Ru…anager for Device Events and Files.
+[+  34.7] [  OK  ] Closed systemd-udevd-control.socket - udev Control Socket.
+[+  34.7] [  OK  ] Closed systemd-udevd-kernel.socket - udev Kernel Socket.
+[+  34.7]          Starting initrd-udevadm-cleanup-db.service - Cleanup udev Database...
+[+  34.7] [  OK  ] Stopped systemd-network-generator.…ork Units from Kernel Command Line.
+[+  34.7] [  OK  ] Stopped systemd-tmpfiles-setup-dev…Create Static Device Nodes in /dev.
+[+  34.7] [  OK  ] Stopped systemd-tmpfiles-setup-dev…ic Device Nodes in /dev gracefully.
+[+  34.7] [  OK  ] Stopped kmod-static-nodes.service …Create List of Static Device Nodes.
+[+  34.7] [  OK  ] Stopped systemd-udev-load-credenti…- Load udev Rules from Credentials.
+[+  34.8] [  OK  ] Finished initrd-udevadm-cleanup-db.service - Cleanup udev Database.
+[+  34.9] [  OK  ] Reached target initrd-switch-root.target - Switch Root.
+[+  34.9]          Starting initrd-switch-root.service - Switch Root...
+[+  36.7] 
+[+  36.8] Welcome to Debian GNU/Linux 13 (trixie)!
+[+  36.8] 
+[+  42.5] [  OK  ] Stopped initrd-switch-root.service - Switch Root.
+[+  42.5] [  OK  ] Created slice system-getty.slice - Slice /system/getty.
+[+  42.5] [  OK  ] Created slice system-serial\x2dget…slice - Slice /system/serial-getty.
+[+  42.5] [  OK  ] Created slice user.slice - User and Session Slice.
+[+  42.5] [  OK  ] Started systemd-ask-password-conso…equests to Console Directory Watch.
+[+  42.5] [  OK  ] Started systemd-ask-password-wall.…d Requests to Wall Directory Watch.
+[+  42.5] [  OK  ] Set up automount proc-sys-fs-binfm…ormats File System Automount Point.
+[+  42.5]          Expecting device dev-ttyS0.device - /dev/ttyS0...
+[+  42.5] [  OK  ] Stopped target initrd-switch-root.target - Switch Root.
+[+  42.5] [  OK  ] Stopped target initrd-fs.target - Initrd File Systems.
+[+  42.5] [  OK  ] Stopped target initrd-root-fs.target - Initrd Root File System.
+[+  42.5] [  OK  ] Reached target paths.target - Path Units.
+[+  42.5] [  OK  ] Reached target remote-fs.target - Remote File Systems.
+[+  42.5] [  OK  ] Reached target slices.target - Slice Units.
+[+  42.5] [  OK  ] Reached target swap.target - Swaps.
+[+  42.5] [  OK  ] Reached target time-set.target - System Time Set.
+[+  42.5] [  OK  ] Listening on systemd-creds.socket - Credential Encryption/Decryption.
+[+  42.5] [  OK  ] Listening on systemd-initctl.socke…- initctl Compatibility Named Pipe.
+[+  42.6] [  OK  ] Listening on systemd-mountfsd.socket - DDI File System Mounter Socket.
+[+  42.6] [  OK  ] Listening on systemd-networkd.socket - Network Service Netlink Socket.
+[+  42.6] [  OK  ] Listening on systemd-nsresourced.s… Namespace Resource Manager Socket.
+[+  42.6] [  OK  ] Listening on systemd-udevd-control.socket - udev Control Socket.
+[+  42.6] [  OK  ] Listening on systemd-udevd-kernel.socket - udev Kernel Socket.
+[+  42.6]          Mounting tmp.mount - Temporary Directory /tmp...
+[+  42.6]          Starting kmod-static-nodes.service…eate List of Static Device Nodes...
+[+  42.6]          Starting modprobe@configfs.service - Load Kernel Module configfs...
+[+  42.6]          Starting modprobe@dm_mod.service - Load Kernel Module dm_mod...
+[+  42.6]          Starting modprobe@drm.service - Load Kernel Module drm...
+[+  42.7]          Starting modprobe@efi_pstore.servi… - Load Kernel Module efi_pstore...
+[+  42.7]          Starting modprobe@fuse.service - Load Kernel Module fuse...
+[+  42.7]          Starting modprobe@loop.service - Load Kernel Module loop...
+[+  42.7] [  OK  ] Stopped systemd-fsck-usr.service.
+[+  42.9]          Starting systemd-journald.service - Journal Service...
+[+  42.9]          Starting systemd-modules-load.service - Load Kernel Modules...
+[+  42.9]          Starting systemd-network-generator…k Units from Kernel Command Line...
+[+  42.9]          Starting systemd-remount-fs.servic…unt Root and Kernel File Systems...
+[+  43.0]          Starting systemd-udev-load-credent…Load udev Rules from Credentials...
+[+  43.0]          Starting systemd-udev-trigger.service - Coldplug All udev Devices...
+[+  43.0] [  OK  ] Stopped systemd-veritysetup@usr.service.
+[+  43.0] [  OK  ] Mounted tmp.mount - Temporary Directory /tmp.
+[+  43.1] [  OK  ] Finished kmod-static-nodes.service…Create List of Static Device Nodes.
+[+  43.1] [  OK  ] Finished modprobe@configfs.service - Load Kernel Module configfs.
+[+  43.1] [  OK  ] Finished modprobe@dm_mod.service - Load Kernel Module dm_mod.
+[+  43.1] [  OK  ] Finished modprobe@drm.service - Load Kernel Module drm.
+[+  43.1] [  OK  ] Finished modprobe@efi_pstore.service - Load Kernel Module efi_pstore.
+[+  43.1] [  OK  ] Finished modprobe@fuse.service - Load Kernel Module fuse.
+[+  43.1] [  OK  ] Finished modprobe@loop.service - Load Kernel Module loop.
+[+  43.1] [  OK  ] Finished systemd-modules-load.service - Load Kernel Modules.
+[+  43.1] [  OK  ] Finished systemd-network-generator…ork Units from Kernel Command Line.
+[+  43.2] [  OK  ] Finished systemd-remount-fs.servic…mount Root and Kernel File Systems.
+[+  43.2]          Starting systemd-random-seed.service - Load/Save OS Random Seed...
+[+  43.2]          Starting systemd-growfs-root.service - Grow Root File System...
+[+  43.2]          Starting systemd-sysctl.service - Apply Kernel Variables...
+[+  43.2]          Starting systemd-tmpfiles-setup-de… Device Nodes in /dev gracefully...
+[+  43.2] [  OK  ] Started systemd-journald.service - Journal Service.
+[+  43.2] [  OK  ] Finished systemd-udev-load-credent…- Load udev Rules from Credentials.
+[+  43.4] [  OK  ] Finished systemd-random-seed.service - Load/Save OS Random Seed.
+[+  43.4] [  OK  ] Finished systemd-sysctl.service - Apply Kernel Variables.
+[+  43.4]          Starting systemd-journal-flush.ser…sh Journal to Persistent Storage...
+[+  43.5] [  OK  ] Finished systemd-growfs-root.service - Grow Root File System.
+[+  43.5] [  OK  ] Finished systemd-tmpfiles-setup-de…ic Device Nodes in /dev gracefully.
+[+  43.5]          Starting systemd-sysusers.service - Create System Users...
+[+  43.6] [  OK  ] Finished systemd-journal-flush.ser…lush Journal to Persistent Storage.
+[+  43.7] [  OK  ] Finished systemd-sysusers.service - Create System Users.
+[+  43.7]          Starting systemd-tmpfiles-setup-de…eate Static Device Nodes in /dev...
+[+  43.9] [  OK  ] Finished systemd-tmpfiles-setup-de…Create Static Device Nodes in /dev.
+[+  43.9] [  OK  ] Reached target local-fs-pre.target…Preparation for Local File Systems.
+[+  43.9] [  OK  ] Set up automount boot.automount - EFI System Partition Automount.
+[+  43.9]          Starting systemd-udevd.service - R…ager for Device Events and Files...
+[+  44.2] [  OK  ] Finished systemd-udev-trigger.service - Coldplug All udev Devices.
+[+  44.2]          Starting systemd-udev-settle.servi…o Complete Device Initialization...
+[+  44.3] [  OK  ] Started systemd-udevd.service - Ru…anager for Device Events and Files.
+[+  44.4]          Starting modprobe@configfs.service - Load Kernel Module configfs...
+[+  44.4]          Starting modprobe@fuse.service - Load Kernel Module fuse...
+[+  44.5] [  OK  ] Finished modprobe@configfs.service - Load Kernel Module configfs.
+[+  44.5] [  OK  ] Finished modprobe@fuse.service - Load Kernel Module fuse.
+[+  44.5] [  OK  ] Reached target local-fs.target - Local File Systems.
+[+  44.5] [  OK  ] Reached target machines.target - Containers.
+[+  44.5] [  OK  ] Listening on systemd-bootctl.socket - Boot Entries Service Socket.
+[+  44.5] [  OK  ] Listening on systemd-importd.socke…Disk Image Download Service Socket.
+[+  44.6] [  OK  ] Listening on systemd-sysext.socket… System Extension Image Management.
+[+  44.6]          Starting systemd-binfmt.service - Set Up Additional Binary Formats...
+[+  44.6]          Starting systemd-boot-random-seed.…- Update Boot Loader Random Seed...
+[+  44.6]          Starting systemd-boot-update.service - Automatic Boot Loader Update...
+[+  44.7]          Starting systemd-tmpfiles-setup.se…ate System Files and Directories...
+[+  44.8] [  OK  ] Created slice system-systemd\x2dfs…slice - Slice /system/systemd-fsck.
+[+  44.8]          Expecting device dev-disk-by\x2ddi… - /dev/disk/by-diskseq/12-part1...
+[+  44.8]          Mounting proc-sys-fs-binfmt_misc.m…cutable File Formats File System...
+[+  45.0] [  OK  ] Mounted proc-sys-fs-binfmt_misc.mo…xecutable File Formats File System.
+[+  45.0] [  OK  ] Finished systemd-binfmt.service - Set Up Additional Binary Formats.
+[+  45.1] [  OK  ] Finished systemd-tmpfiles-setup.se…reate System Files and Directories.
+[+  45.1]          Starting ldconfig.service - Rebuild Dynamic Linker Cache...
+[+  45.1]          Starting systemd-firstboot.service - First Boot Wizard...
+[+  45.1]          Starting systemd-journal-catalog-u…ervice - Rebuild Journal Catalog...
+[+  45.7] [  OK  ] Finished systemd-firstboot.service - First Boot Wizard.
+[+  45.8] [  OK  ] Reached target first-boot-complete.target - First Boot Complete.
+[+  45.8]          Starting systemd-machine-id-commit…ave Transient machine-id to Disk...
+[+  45.9] [  OK  ] Finished systemd-journal-catalog-u….service - Rebuild Journal Catalog.
+[+  46.1] [  OK  ] Finished systemd-machine-id-commit… Save Transient machine-id to Disk.
+[+  46.8] [  OK  ] Listening on systemd-rfkill.socket…ll Switch Status /dev/rfkill Watch.
+[+  46.9]          Starting systemd-fsck@dev-disk-by\…on /dev/disk/by-diskseq/12-part1...
+[+  47.0] [  OK  ] Finished systemd-udev-settle.servi… To Complete Device Initialization.
+[+  47.0]          Starting signage-config.service - …fig.toml (network, NTP, display)...
+[+  47.3] [  OK  ] Finished systemd-fsck@dev-disk-by\…k on /dev/disk/by-diskseq/12-part1.
+[+  47.3]          Mounting boot.mount - EFI System Partition Automount...
+[+  47.9] [  OK  ] Mounted boot.mount - EFI System Partition Automount.
+[+  48.1] [  OK  ] Finished systemd-boot-random-seed.…e - Update Boot Loader Random Seed.
+[+  48.1] [  OK  ] Finished systemd-boot-update.service - Automatic Boot Loader Update.
+[+  49.2] [  OK  ] Finished ldconfig.service - Rebuild Dynamic Linker Cache.
+[+  49.3]          Starting systemd-update-done.service - Update is Completed...
+[+  49.4] [  OK  ] Finished systemd-update-done.service - Update is Completed.
+[+  49.4] [  OK  ] Reached target sysinit.target - System Initialization.
+[+  49.4] [  OK  ] Started systemd-tmpfiles-clean.tim…y Cleanup of Temporary Directories.
+[+  49.4] [  OK  ] Listening on dbus.socket - D-Bus System Message Bus Socket.
+[+  49.4] [  OK  ] Listening on systemd-hostnamed.socket - Hostname Service Socket.
+[+  49.5] [  OK  ] Reached target sockets.target - Socket Units.
+[+  49.5] [  OK  ] Reached target basic.target - Basic System.
+[+  49.5]          Starting dbus.service - D-Bus System Message Bus...
+[+  49.5]          Starting e2scrub_reap.service - Re…ne ext4 Metadata Check Snapshots...
+[+  49.5] [  OK  ] Started signage-web.service - Loca…gnage host page and OGraf packages.
+[+  49.6]          Starting systemd-logind.service - User Login Management...
+[+  49.7] [  OK  ] Started dbus.service - D-Bus System Message Bus.
+[+  49.8]          Starting wpa_supplicant.service - WPA supplicant...
+[+  49.9] [  OK  ] Finished e2scrub_reap.service - Re…line ext4 Metadata Check Snapshots.
+[+  50.1] [  OK  ] Started systemd-logind.service - User Login Management.
+[+  50.1] [  OK  ] Finished signage-config.service - …onfig.toml (network, NTP, display).
+[+  50.1] [  OK  ] Reached target network-pre.target - Preparation for Network.
+[+  50.2]          Starting NetworkManager.service - Network Manager...
+[+  50.2]          Starting chrony.service - chrony, an NTP client/server...
+[+  50.2] [  OK  ] Started signage-install.service - … signage player from the USB stick.
+[+  50.2]          Starting systemd-networkd.service - Network Configuration...
+[+  50.3] [  OK  ] Started wpa_supplicant.service - WPA supplicant.
+[+  50.7] [  OK  ] Started chrony.service - chrony, an NTP client/server.
+[+  50.8]          Starting chrony-wait.service - Wai…rony to synchronize system clock...
+[+  51.1]          Starting systemd-hostnamed.service - Hostname Service...
+[+  51.3] [  OK  ] Started systemd-networkd.service - Network Configuration.
+[+  51.3]          Starting systemd-networkd-persiste…tent Storage in systemd-networkd...
+[+  51.5] [  OK  ] Finished systemd-networkd-persiste…istent Storage in systemd-networkd.
+[+  51.5] [  OK  ] Started systemd-hostnamed.service - Hostname Service.
+[+  51.7]          Starting NetworkManager-dispatcher…anager Script Dispatcher Service...
+[+  51.9] [  OK  ] Started NetworkManager-dispatcher.… Manager Script Dispatcher Service.
+[+  52.0] [  OK  ] Started NetworkManager.service - Network Manager.
+[+  52.0] [  OK  ] Reached target network.target - Network.
+[+  52.0]          Starting systemd-user-sessions.service - Permit User Sessions...
+[+  52.3] [  OK  ] Finished systemd-user-sessions.service - Permit User Sessions.
+[+  52.3] [  OK  ] Started getty@tty2.service - Getty on tty2.
+[+  52.4] [  OK  ] Started serial-getty@ttyS0.service - Serial Getty on ttyS0.
+[+  52.4] [  OK  ] Reached target getty.target - Login Prompts.
+[+  57.4] 
+[+  58.2] Debian GNU/Linux 13 signage-123456 ttyS0
+[+  58.2] 
+[+  58.2] signage-123456 login: root (automatic login)
+[+  58.2] 
+[+  58.3] Linux signage-123456 6.12.117+deb13-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.117-1 (2026-11-12) x86_64
+[+  58.3] 
+[+  58.3] The programs included with the Debian GNU/Linux system are free software;
+[+  58.3] the exact distribution terms for each program are described in the
+[+  58.3] individual files in /usr/share/doc/*/copyright.
+[+  58.3] 
+[+  58.3] Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+[+  58.3] permitted by applicable law.
+[+  61.2] root@signage-123456:~# 
+[+ 127.2] Broadcast message from root@signage on tty1 (Sat 2026-11-21 13:40:36 EST):
+[+ 127.2] 
+[+ 127.2] The system will reboot now!
+[+ 127.2] 
+[+ 127.3] [  OK  ] Stopped signage-install.service - … signage player from the USB stick.
+[+ 127.4]          Stopping session-1.scope - Session 1 of User root...
+[+ 127.4]          Stopping session-2.scope - Session 2 of User root...
+[+ 127.4] 
+[+ 127.4] [  OK  ] Removed slice system-modprobe.slice - Slice /system/modprobe.
+[+ 127.4] [  OK  ] Removed slice system-systemd\x2dpc…lice - Slice /system/systemd-pcrfs.
+[+ 127.4] [  OK  ] Removed slice system-systemd\x2dve… Slice /system/systemd-veritysetup.
+[+ 127.4] [  OK  ] Stopped target multi-user.target - Multi-User System.
+[+ 127.4] [  OK  ] Stopped target getty.target - Login Prompts.
+[+ 127.4] [  OK  ] Stopped target machines.target - Containers.
+[+ 127.4] [  OK  ] Stopped target timers.target - Timer Units.
+[+ 127.4] [  OK  ] Stopped dpkg-db-backup.timer - Daily dpkg database backup timer.
+[+ 127.4] [  OK  ] Stopped e2scrub_all.timer - Period…Metadata Check for All Filesystems.
+[+ 127.4] [  OK  ] Stopped fstrim.timer - Discard unused filesystem blocks once a week.
+[+ 127.4] [  OK  ] Stopped systemd-sysupdate-reboot.t… Automatically After System Update.
+[+ 127.4] [  OK  ] Stopped systemd-sysupdate.timer - Automatic System Update.
+[+ 127.4] [  OK  ] Stopped systemd-tmpfiles-clean.tim…y Cleanup of Temporary Directories.
+[+ 127.4] [  OK  ] Stopped target time-sync.target - System Time Synchronized.
+[+ 127.4] [  OK  ] Stopped target time-set.target - System Time Set.
+[+ 127.4] [  OK  ] Closed systemd-rfkill.socket - Loa…ll Switch Status /dev/rfkill Watch.
+[+ 127.4] [  OK  ] Stopped chrony-wait.service - Wait…chrony to synchronize system clock.
+[+ 127.4]          Stopping chrony.service - chrony, an NTP client/server...
+[+ 127.4]          Stopping getty@tty2.service - Getty on tty2...
+[+ 127.5]          Stopping serial-getty@ttyS0.service - Serial Getty on ttyS0...
+[+ 127.5]          Stopping signage-web.service - Loc…age host page and OGraf packages...
+[+ 127.5] [  OK  ] Stopped systemd-machine-id-commit.… Save Transient machine-id to Disk.
+[+ 127.5] [  OK  ] Stopped target first-boot-complete.target - First Boot Complete.
+[+ 127.5]          Stopping systemd-networkd-persiste…tent Storage in systemd-networkd...
+[+ 127.5] [  OK  ] Stopped systemd-udev-load-credenti…- Load udev Rules from Credentials.
+[+ 127.5] [  OK  ] Stopped signage-web.service - Loca…gnage host page and OGraf packages.
+[+ 127.5] [  OK  ] Stopped chrony.service - chrony, an NTP client/server.
+[+ 127.5] [  OK  ] Stopped getty@tty2.service - Getty on tty2.
+[+ 127.6] [  OK  ] Stopped serial-getty@ttyS0.service - Serial Getty on ttyS0.
+[+ 127.6] [  OK  ] Stopped systemd-networkd-persisten…istent Storage in systemd-networkd.
+[+ 128.0] [  OK  ] Stopped session-1.scope - Session 1 of User root.
+[+ 128.0] [  OK  ] Stopped session-2.scope - Session 2 of User root.
+[+ 128.0] [  OK  ] Removed slice system-getty.slice - Slice /system/getty.
+[+ 128.0] [  OK  ] Removed slice system-serial\x2dget…slice - Slice /system/serial-getty.
+[+ 128.0]          Stopping systemd-user-sessions.service - Permit User Sessions...
+[+ 128.0]          Stopping user@0.service - User Manager for UID 0...
+[+ 128.1] [  OK  ] Stopped systemd-user-sessions.service - Permit User Sessions.
+[+ 128.1] [  OK  ] Stopped target network.target - Network.
+[+ 128.2] [  OK  ] Stopped target remote-fs.target - Remote File Systems.
+[+ 128.2]          Stopping NetworkManager.service - Network Manager...
+[+ 128.2]          Stopping systemd-networkd.service - Network Configuration...
+[+ 128.2]          Stopping wpa_supplicant.service - WPA supplicant...
+[+ 128.2] [  OK  ] Stopped wpa_supplicant.service - WPA supplicant.
+[+ 128.2] [  OK  ] Stopped systemd-networkd.service - Network Configuration.
+[+ 128.3] [  OK  ] Stopped user@0.service - User Manager for UID 0.
+[+ 128.4] [  OK  ] Stopped NetworkManager.service - Network Manager.
+[+ 128.4] [  OK  ] Stopped target network-pre.target - Preparation for Network.
+[+ 128.4] [  OK  ] Stopped systemd-network-generator.…ork Units from Kernel Command Line.
+[+ 128.4]          Stopping user-runtime-dir@0.servic…er Runtime Directory /run/user/0...
+[+ 128.6] [  OK  ] Unmounted run-user-0.mount - /run/user/0.
+[+ 128.6] [  OK  ] Stopped user-runtime-dir@0.service…User Runtime Directory /run/user/0.
+[+ 128.6] [  OK  ] Removed slice user-0.slice - User Slice of UID 0.
+[+ 128.6]          Stopping dbus.service - D-Bus System Message Bus...
+[+ 128.6]          Stopping systemd-logind.service - User Login Management...
+[+ 128.6] [  OK  ] Stopped dbus.service - D-Bus System Message Bus.
+[+ 128.7] [  OK  ] Stopped systemd-logind.service - User Login Management.
+[+ 128.7] [  OK  ] Stopped target basic.target - Basic System.
+[+ 128.7] [  OK  ] Stopped target paths.target - Path Units.
+[+ 128.7] [  OK  ] Stopped systemd-ask-password-conso…equests to Console Directory Watch.
+[+ 128.7] [  OK  ] Stopped systemd-ask-password-wall.…d Requests to Wall Directory Watch.
+[+ 128.7] [  OK  ] Stopped target slices.target - Slice Units.
+[+ 128.7] [  OK  ] Removed slice user.slice - User and Session Slice.
+[+ 128.7] [  OK  ] Stopped target sockets.target - Socket Units.
+[+ 128.7] [  OK  ] Closed dbus.socket - D-Bus System Message Bus Socket.
+[+ 128.7] [  OK  ] Closed systemd-hostnamed.socket - Hostname Service Socket.
+[+ 128.7] [  OK  ] Stopped target sysinit.target - System Initialization.
+[+ 128.7] [  OK  ] Closed systemd-importd.socket - Disk Image Download Service Socket.
+[+ 128.7] [  OK  ] Closed systemd-mountfsd.socket - DDI File System Mounter Socket.
+[+ 128.7] [  OK  ] Closed systemd-networkd.socket - Network Service Netlink Socket.
+[+ 128.7]          Stopping systemd-binfmt.service - Set Up Additional Binary Formats...
+[+ 128.7] [  OK  ] Stopped systemd-boot-random-seed.s…e - Update Boot Loader Random Seed.
+[+ 128.7] [  OK  ] Stopped systemd-firstboot.service - First Boot Wizard.
+[+ 128.7]          Stopping systemd-nsresourced.service - Namespace Resource Manager...
+[+ 128.7]          Stopping systemd-random-seed.service - Load/Save OS Random Seed...
+[+ 128.7] [  OK  ] Stopped systemd-sysctl.service - Apply Kernel Variables.
+[+ 128.7] [  OK  ] Stopped systemd-modules-load.service - Load Kernel Modules.
+[+ 128.8] [  OK  ] Stopped systemd-update-done.service - Update is Completed.
+[+ 128.8] [  OK  ] Stopped ldconfig.service - Rebuild Dynamic Linker Cache.
+[+ 128.8] [  OK  ] Stopped systemd-boot-update.service - Automatic Boot Loader Update.
+[+ 128.8] [  OK  ] Stopped systemd-journal-catalog-up….service - Rebuild Journal Catalog.
+[+ 128.8] [  OK  ] Stopped systemd-tmpfiles-setup.ser…reate System Files and Directories.
+[+ 128.8] [  OK  ] Stopped systemd-nsresourced.service - Namespace Resource Manager.
+[+ 128.8] [  OK  ] Closed systemd-nsresourced.socket - Namespace Resource Manager Socket.
+[+ 128.9] [  OK  ] Stopped systemd-binfmt.service - Set Up Additional Binary Formats.
+[+ 128.9] [  OK  ] Unset automount proc-sys-fs-binfmt…ormats File System Automount Point.
+[+ 128.9] [  OK  ] Stopped target local-fs.target - Local File Systems.
+[+ 128.9]          Unmounting boot.mount - EFI System Partition Automount...
+[+ 128.9]          Unmounting run-lock.mount - Legacy Locks Directory /run/lock...
+[+ 128.9]          Unmounting tmp.mount - Temporary Directory /tmp...
+[+ 128.9] [  OK  ] Stopped systemd-growfs-root.service - Grow Root File System.
+[+ 128.9] [  OK  ] Stopped systemd-random-seed.service - Load/Save OS Random Seed.
+[+ 129.0] [  OK  ] Unmounted run-lock.mount - Legacy Locks Directory /run/lock.
+[+ 129.0] [  OK  ] Unmounted tmp.mount - Temporary Directory /tmp.
+[+ 129.0] [  OK  ] Stopped target swap.target - Swaps.
+[+ 129.2] [  OK  ] Unmounted boot.mount - EFI System Partition Automount.
+[+ 129.2] [  OK  ] Unset automount boot.automount - EFI System Partition Automount.
+[+ 129.2] [  OK  ] Reached target umount.target - Unmount All Filesystems.
+[+ 129.2] [  OK  ] Stopped systemd-fsck@dev-disk-by\x…k on /dev/disk/by-diskseq/12-part1.
+[+ 129.2] [  OK  ] Removed slice system-systemd\x2dfs…slice - Slice /system/systemd-fsck.
+[+ 129.2] [  OK  ] Stopped target local-fs-pre.target…Preparation for Local File Systems.
+[+ 129.2] [  OK  ] Stopped systemd-tmpfiles-setup-dev…Create Static Device Nodes in /dev.
+[+ 129.2] [  OK  ] Stopped systemd-sysusers.service - Create System Users.
+[+ 129.2] [  OK  ] Stopped systemd-remount-fs.service…mount Root and Kernel File Systems.
+[+ 129.2] [  OK  ] Stopped systemd-tmpfiles-setup-dev…ic Device Nodes in /dev gracefully.
+[+ 129.2] [  OK  ] Reached target shutdown.target - System Shutdown.
+[+ 129.2] [  OK  ] Reached target final.target - Late Shutdown Services.
+[+ 129.2] [  OK  ] Finished systemd-reboot.service - System Reboot.
+[+ 129.2] [  OK  ] Reached target reboot.target - System Reboot.
+[+ 129.5] [  117.051164] watchdog: watchdog0: watchdog did not stop!
+[+ 129.9] [  117.472125] watchdog: watchdog0: watchdog did not stop!
+[+ 129.9] [  117.475660] systemd-shutdown[1]: Unable to finalize remaining DM devices, ignoring.
+[+ 130.0] [  117.556523] ------------[ cut here ]------------
+[+ 130.0] [  117.561190] WARNING: CPU: 2 PID: 252 at drivers/gpu/drm/virtio/virtgpu_vq.c:373 virtio_gpu_queue_fenced_ctrl_buffer+0x4ca/0x590 [virtio_gpu]
+[+ 130.0] [  117.566057] Modules linked in: nls_ascii nls_cp437 vfat fat binfmt_misc erofs libcrc32c ext4 crc16 dm_verity mbcache dm_bufio jbd2 reed_solomon crc32c_generic sd_mod sr_mod kvm_amd cdrom sg hid_generic ccp kvm usbhid uas irqbypass virtio_gpu crct10dif_pclmul hid usb_storage virtio_dma_buf crc32_pclmul ahci drm_shmem_helper cfg80211 iTCO_wdt intel_pmc_bxt crc32c_intel libahci iTCO_vendor_support ppdev ghash_clmulni_intel drm_kms_helper watchdog nvme rfkill libata drm sha512_ssse3 xhci_pci parport_pc nvme_core sha256_ssse3 sha1_ssse3 i2c_i801 xhci_hcd parport psmouse lpc_ich scsi_mod i2c_smbus usbcore virtio_net nvme_auth evdev usb_common net_failover scsi_common pcspkr button failover serio_raw dm_mod loop efi_pstore configfs nfnetlink efivarfs qemu_fw_cfg ip_tables x_tables autofs4 aesni_intel gf128mul crypto_simd cryptd
+[+ 130.0] [  117.584544] CPU: 2 UID: 0 PID: 252 Comm: kworker/2:2 Not tainted 6.12.117+deb13-amd64 #1  Debian 6.12.117-1
+[+ 130.0] [  117.587074] Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 2025.02-8+deb13u1 11/08/2025
+[+ 130.0] [  117.589770] Workqueue: events drm_fb_helper_damage_work [drm_kms_helper]
+[+ 130.0] [  117.592931] RIP: 0010:virtio_gpu_queue_fenced_ctrl_buffer+0x4ca/0x590 [virtio_gpu]
+[+ 130.0] [  117.595872] Code: 00 00 e8 49 3c 07 c9 48 8d 44 24 48 c7 44 24 14 02 00 00 00 48 89 84 24 b8 00 00 00 48 c7 44 24 08 00 00 00 00 e9 3a fc ff ff <0f> 0b e9 c1 fd ff ff 4c 8b 30 8b 1c 24 4c 89 b4 24 b8 00 00 00 c7
+[+ 130.0] [  117.601834] RSP: 0018:ff543b2e004efb10 EFLAGS: 00010282
+[+ 130.0] [  117.605080] RAX: 00000000fffffffb RBX: 0000000000000000 RCX: 0000000000000820
+[+ 130.0] [  117.608115] RDX: 0000000000000000 RSI: ff543b2e004efbc0 RDI: ff1264c063969000
+[+ 130.0] [  117.610918] RBP: ff1264c063969000 R08: 0000000000000000 R09: ff1264c04c10d000
+[+ 130.0] [  117.613515] R10: 0000000000000001 R11: 0000000000000001 R12: ff1264c05bc00028
+[+ 130.0] [  117.616132] R13: ff1264c05bc0fd48 R14: ff543b2e004efb98 R15: ff1264c04c10d000
+[+ 130.0] [  117.619755] FS:  0000000000000000(0000) GS:ff1264c0bbb00000(0000) knlGS:0000000000000000
+[+ 130.0] [  117.622813] CS:  0010 DS: 0000 ES: 0000 CR0: 0000000080050033
+[+ 130.0] [  117.625338] CR2: 0000563234ee6588 CR3: 0000000121bf2000 CR4: 0000000000751ef0
+[+ 130.0] [  117.628166] PKRU: 55555554
+[+ 130.0] [  117.630928] Call Trace:
+[+ 130.0] [  117.634461]  <TASK>
+[+ 130.1] [  117.637251]  virtio_gpu_primary_plane_update+0x3a1/0x420 [virtio_gpu]
+[+ 130.1] [  117.640223]  drm_atomic_helper_commit_planes+0x112/0x320 [drm_kms_helper]
+[+ 130.1] [  117.643567]  drm_atomic_helper_commit_tail+0x48/0x90 [drm_kms_helper]
+[+ 130.1] [  117.646485]  commit_tail+0xd1/0x130 [drm_kms_helper]
+[+ 130.1] [  117.649339]  drm_atomic_helper_commit+0x11a/0x140 [drm_kms_helper]
+[+ 130.1] [  117.652349]  drm_atomic_commit+0xa9/0xe0 [drm]
+[+ 130.1] [  117.656288]  ? __pfx___drm_printfn_info+0x10/0x10 [drm]
+[+ 130.1] [  117.659152]  drm_atomic_helper_dirtyfb+0x1c6/0x2a0 [drm_kms_helper]
+[+ 130.1] [  117.662072]  drm_fbdev_shmem_helper_fb_dirty+0x4a/0xa0 [drm_shmem_helper]
+[+ 130.1] [  117.665052]  drm_fb_helper_damage_work+0x94/0x170 [drm_kms_helper]
+[+ 130.1] [  117.667870]  process_one_work+0x18b/0x340
+[+ 130.1] [  117.673489]  worker_thread+0x191/0x2f0
+[+ 130.1] [  117.676391]  ? __pfx_worker_thread+0x10/0x10
+[+ 130.1] [  117.679158]  kthread+0xd2/0x100
+[+ 130.1] [  117.681996]  ? __pfx_kthread+0x10/0x10
+[+ 130.1] [  117.684848]  ret_from_fork+0x34/0x50
+[+ 130.1] [  117.688526]  ? __pfx_kthread+0x10/0x10
+[+ 130.1] [  117.691334]  ret_from_fork_asm+0x1a/0x30
+[+ 130.1] [  117.694709]  </TASK>
+[+ 130.1] [  117.697745] ---[ end trace 0000000000000000 ]---
+[+ 130.1] [  117.701031] ------------[ cut here ]------------
+[+ 130.1] [  117.703940] WARNING: CPU: 2 PID: 252 at drivers/gpu/drm/virtio/virtgpu_vq.c:373 virtio_gpu_queue_fenced_ctrl_buffer+0x4ca/0x590 [virtio_gpu]
+[+ 130.1] [  117.708118] Modules linked in: nls_ascii nls_cp437 vfat fat binfmt_misc erofs libcrc32c ext4 crc16 dm_verity mbcache dm_bufio jbd2 reed_solomon crc32c_generic sd_mod sr_mod kvm_amd cdrom sg hid_generic ccp kvm usbhid uas irqbypass virtio_gpu crct10dif_pclmul hid usb_storage virtio_dma_buf crc32_pclmul ahci drm_shmem_helper cfg80211 iTCO_wdt intel_pmc_bxt crc32c_intel libahci iTCO_vendor_support ppdev ghash_clmulni_intel drm_kms_helper watchdog nvme rfkill libata drm sha512_ssse3 xhci_pci parport_pc nvme_core sha256_ssse3 sha1_ssse3 i2c_i801 xhci_hcd parport psmouse lpc_ich scsi_mod i2c_smbus usbcore virtio_net nvme_auth evdev usb_common net_failover scsi_common pcspkr button failover serio_raw dm_mod loop efi_pstore configfs nfnetlink efivarfs qemu_fw_cfg ip_tables x_tables autofs4 aesni_intel gf128mul crypto_simd cryptd
+[+ 130.1] [  117.733344] CPU: 2 UID: 0 PID: 252 Comm: kworker/2:2 Tainted: G        W          6.12.117+deb13-amd64 #1  Debian 6.12.117-1
+[+ 130.2] [  117.757053] reboot: Restarting system
+[+ 130.2] [  117.757197] Tainted: [W]=WARN
+[+ 130.2] [  117.769090] Hardware name: QEMU Standard PC (Q35 + ICH9, 2009), BIOS 2025.02-8+deb13u1 11/08/2025
+[+ 131.6] BdsDxe: loading Boot0008 "Signage" from HD(1,GPT,6AD6AC87-34E5-46CC-B3D8-B7322496056C,0x800,0x100000)/\EFI\systemd\systemd-bootx64.efi
+[+ 132.8] BdsDxe: starting Boot0008 "Signage" from HD(1,GPT,6AD6AC87-34E5-46CC-B3D8-B7322496056C,0x800,0x100000)/\EFI\systemd\systemd-bootx64.efi
+[+ 162.1] Booting initrd of Debian GNU/Linux 13 (trixie).
+[+ 163.1] [  OK  ] Created slice system-modprobe.slice - Slice /system/modprobe.
+[+ 163.1] [  OK  ] Created slice system-systemd\x2dpc…lice - Slice /system/systemd-pcrfs.
+[+ 163.1] [  OK  ] Created slice system-systemd\x2dve… - Verity Protection Service Slice.
+[+ 163.1] [  OK  ] Started systemd-ask-password-conso…equests to Console Directory Watch.
+[+ 163.1] [  OK  ] Set up automount proc-sys-fs-binfm…ormats File System Automount Point.
+[+ 163.1]          Expecting device dev-disk-by\x2dpa…49ce-b8b5-aa72-24fc-09a603b54774...
+[+ 163.1]          Expecting device dev-disk-by\x2dpa…a562-d754-3ae1-b04e-b43e4cae00b6...
+[+ 163.1]          Expecting device dev-gpt\x2dauto\x…root.device - /dev/gpt-auto-root...
+[+ 163.1]          Expecting device dev-mapper-usr.device - /dev/mapper/usr...
+[+ 163.1] [  OK  ] Reached target integritysetup.targ… Local Integrity Protected Volumes.
+[+ 163.1] [  OK  ] Reached target paths.target - Path Units.
+[+ 163.1] [  OK  ] Reached target remote-cryptsetup.target - Remote Encrypted Volumes.
+[+ 163.1] [  OK  ] Reached target remote-veritysetup.… - Remote Verity Protected Volumes.
+[+ 163.1] [  OK  ] Reached target slices.target - Slice Units.
+[+ 163.1] [  OK  ] Reached target swap.target - Swaps.
+[+ 163.2] [  OK  ] Listening on systemd-creds.socket - Credential Encryption/Decryption.
+[+ 163.2] [  OK  ] Listening on systemd-initctl.socke…- initctl Compatibility Named Pipe.
+[+ 163.2] [  OK  ] Listening on systemd-journald-audit.socket - Journal Audit Socket.
+[+ 163.2] [  OK  ] Listening on systemd-journald-dev-…socket - Journal Socket (/dev/log).
+[+ 163.2] [  OK  ] Listening on systemd-journald.socket - Journal Sockets.
+[+ 163.2] [  OK  ] Listening on systemd-networkd.socket - Network Service Netlink Socket.
+[+ 163.2] [  OK  ] Listening on systemd-udevd-control.socket - udev Control Socket.
+[+ 163.2] [  OK  ] Listening on systemd-udevd-kernel.socket - udev Kernel Socket.
+[+ 163.2]          Mounting dev-hugepages.mount - Huge Pages File System...
+[+ 163.2]          Mounting dev-mqueue.mount - POSIX Message Queue File System...
+[+ 163.2]          Mounting run-lock.mount - Legacy Locks Directory /run/lock...
+[+ 163.2]          Mounting sys-kernel-debug.mount - Kernel Debug File System...
+[+ 163.3]          Mounting sys-kernel-tracing.mount - Kernel Trace File System...
+[+ 163.3]          Mounting tmp.mount - Temporary Directory /tmp...
+[+ 163.3]          Starting kmod-static-nodes.service…eate List of Static Device Nodes...
+[+ 163.3]          Starting modprobe@configfs.service - Load Kernel Module configfs...
+[+ 163.3]          Starting modprobe@dm_mod.service - Load Kernel Module dm_mod...
+[+ 163.4]          Starting modprobe@efi_pstore.servi… - Load Kernel Module efi_pstore...
+[+ 163.4]          Starting modprobe@fuse.service - Load Kernel Module fuse...
+[+ 163.4]          Starting modprobe@loop.service - Load Kernel Module loop...
+[+ 163.5]          Starting systemd-journald.service - Journal Service...
+[+ 163.5]          Starting systemd-modules-load.service - Load Kernel Modules...
+[+ 163.6]          Starting systemd-network-generator…k Units from Kernel Command Line...
+[+ 163.6] [  OK  ] Reached target cryptsetup.target - Local Encrypted Volumes.
+[+ 163.7]          Starting systemd-udev-load-credent…Load udev Rules from Credentials...
+[+ 163.7]          Starting systemd-udev-trigger.service - Coldplug All udev Devices...
+[+ 163.7] [  OK  ] Mounted dev-hugepages.mount - Huge Pages File System.
+[+ 163.7] [  OK  ] Mounted dev-mqueue.mount - POSIX Message Queue File System.
+[+ 163.7] [  OK  ] Mounted run-lock.mount - Legacy Locks Directory /run/lock.
+[+ 163.7] [  OK  ] Mounted sys-kernel-debug.mount - Kernel Debug File System.
+[+ 163.7] [  OK  ] Mounted sys-kernel-tracing.mount - Kernel Trace File System.
+[+ 163.7] [  OK  ] Mounted tmp.mount - Temporary Directory /tmp.
+[+ 163.8] [  OK  ] Finished kmod-static-nodes.service…Create List of Static Device Nodes.
+[+ 163.8] [  OK  ] Finished modprobe@configfs.service - Load Kernel Module configfs.
+[+ 163.8] [  OK  ] Finished modprobe@dm_mod.service - Load Kernel Module dm_mod.
+[+ 163.8] [  OK  ] Finished modprobe@efi_pstore.service - Load Kernel Module efi_pstore.
+[+ 163.8] [  OK  ] Finished modprobe@fuse.service - Load Kernel Module fuse.
+[+ 163.8] [  OK  ] Finished modprobe@loop.service - Load Kernel Module loop.
+[+ 163.8] [  OK  ] Finished systemd-modules-load.service - Load Kernel Modules.
+[+ 163.8]          Mounting sys-fs-fuse-connections.mount - FUSE Control File System...
+[+ 163.9]          Mounting sys-kernel-config.mount - Kernel Configuration File System...
+[+ 163.9]          Starting systemd-sysctl.service - Apply Kernel Variables...
+[+ 163.9]          Starting systemd-tmpfiles-setup-de… Device Nodes in /dev gracefully...
+[+ 163.9] [  OK  ] Finished systemd-network-generator…ork Units from Kernel Command Line.
+[+ 164.0] [  OK  ] Finished systemd-udev-load-credent…- Load udev Rules from Credentials.
+[+ 164.0] [  OK  ] Reached target network-pre.target - Preparation for Network.
+[+ 164.0] [  OK  ] Mounted sys-fs-fuse-connections.mount - FUSE Control File System.
+[+ 164.1] [  OK  ] Mounted sys-kernel-config.mount - Kernel Configuration File System.
+[+ 164.1] [  OK  ] Finished systemd-sysctl.service - Apply Kernel Variables.
+[+ 164.2] [  OK  ] Finished systemd-tmpfiles-setup-de…ic Device Nodes in /dev gracefully.
+[+ 164.2]          Starting systemd-tmpfiles-setup-de…eate Static Device Nodes in /dev...
+[+ 164.2] [  OK  ] Started systemd-journald.service - Journal Service.
+[+ 164.4] [  OK  ] Finished systemd-tmpfiles-setup-de…Create Static Device Nodes in /dev.
+[+ 164.4] [  OK  ] Reached target local-fs-pre.target…Preparation for Local File Systems.
+[+ 164.4] [  OK  ] Reached target local-fs.target - Local File Systems.
+[+ 164.4] [  OK  ] Listening on systemd-sysext.socket… System Extension Image Management.
+[+ 164.4]          Starting systemd-tmpfiles-setup.se…ate System Files and Directories...
+[+ 164.4]          Starting systemd-udevd.service - R…ager for Device Events and Files...
+[+ 164.6] [  OK  ] Finished systemd-tmpfiles-setup.se…reate System Files and Directories.
+[+ 164.8] [  OK  ] Finished systemd-udev-trigger.service - Coldplug All udev Devices.
+[+ 164.8] [  OK  ] Started systemd-udevd.service - Ru…anager for Device Events and Files.
+[+ 166.6]          Starting systemd-networkd.service - Network Configuration...
+[+ 166.8] [  OK  ] Found device dev-gpt\x2dauto\x2droot.device - QEMU NVMe Ctrl root.
+[+ 166.9] [  OK  ] Found device dev-disk-by\x2dpartuu…rl signage_verity_0.1.0.2611211835.
+[+ 167.1] [  OK  ] Found device dev-disk-by\x2dpartuu… Ctrl signage_usr_0.1.0.2611211835.
+[+ 167.3] [  OK  ] Reached target initrd-root-device.target - Initrd Root Device.
+[+ 167.3]          Mounting sysroot.mount - Root Partition...
+[+ 167.3]          Starting systemd-veritysetup@usr.s…tegrity Protection Setup for usr...
+[+ 168.1] [  OK  ] Found device dev-mapper-usr.device - /dev/mapper/usr.
+[+ 168.1] [  OK  ] Finished systemd-veritysetup@usr.s…Integrity Protection Setup for usr.
+[+ 168.2] [  OK  ] Reached target blockdev@dev-mapper…ce Preparation for /dev/mapper/usr.
+[+ 168.2] [  OK  ] Reached target veritysetup.target - Local Verity Protected Volumes.
+[+ 168.2] [  OK  ] Reached target sysinit.target - System Initialization.
+[+ 168.2] [  OK  ] Reached target timers.target - Timer Units.
+[+ 168.2] [  OK  ] Listening on systemd-hostnamed.socket - Hostname Service Socket.
+[+ 168.2] [  OK  ] Reached target sockets.target - Socket Units.
+[+ 168.2]          Starting systemd-fsck-usr.service … System Check on /dev/mapper/usr...
+[+ 168.2] [  OK  ] Reached target basic.target - Basic System.
+[+ 168.4] [  OK  ] Started systemd-networkd.service - Network Configuration.
+[+ 168.4] [  OK  ] Reached target network.target - Network.
+[+ 169.2] [  OK  ] Mounted sysroot.mount - Root Partition.
+[+ 171.4] [  OK  ] Finished systemd-fsck-usr.service …le System Check on /dev/mapper/usr.
+[+ 171.4]          Mounting sysusr-usr.mount - /sysusr/usr...
+[+ 171.7] [  OK  ] Mounted sysusr-usr.mount - /sysusr/usr.
+[+ 171.7] [  OK  ] Reached target initrd-usr-fs.target - Initrd /usr File System.
+[+ 171.8]          Mounting sysroot-usr.mount - /sysroot/usr...
+[+ 171.8] [  OK  ] Reached target initrd-root-fs.target - Initrd Root File System.
+[+ 171.8]          Starting initrd-parse-etc.service …ints Configured in the Real Root...
+[+ 171.8] [  OK  ] Mounted sysroot-usr.mount - /sysroot/usr.
+[+ 172.1] [  OK  ] Finished initrd-parse-etc.service …points Configured in the Real Root.
+[+ 172.1] [  OK  ] Reached target initrd-fs.target - Initrd File Systems.
+[+ 172.1] [  OK  ] Reached target initrd.target - Initrd Default Target.
+[+ 172.1]          Starting initrd-cleanup.service - …ing Up and Shutting Down Daemons...
+[+ 172.2] [  OK  ] Stopped target blockdev@dev-mapper…ce Preparation for /dev/mapper/usr.
+[+ 172.2] [  OK  ] Stopped target initrd.target - Initrd Default Target.
+[+ 172.2] [  OK  ] Stopped target basic.target - Basic System.
+[+ 172.2] [  OK  ] Stopped target initrd-root-device.target - Initrd Root Device.
+[+ 172.2] [  OK  ] Stopped target initrd-usr-fs.target - Initrd /usr File System.
+[+ 172.2] [  OK  ] Stopped target network.target - Network.
+[+ 172.2] [  OK  ] Stopped target paths.target - Path Units.
+[+ 172.2] [  OK  ] Stopped target remote-cryptsetup.target - Remote Encrypted Volumes.
+[+ 172.2] [  OK  ] Stopped target remote-veritysetup.… - Remote Verity Protected Volumes.
+[+ 172.2] [  OK  ] Stopped target slices.target - Slice Units.
+[+ 172.2] [  OK  ] Stopped target sockets.target - Socket Units.
+[+ 172.2] [  OK  ] Stopped target timers.target - Timer Units.
+[+ 172.2] [  OK  ] Closed systemd-creds.socket - Credential Encryption/Decryption.
+[+ 172.2] [  OK  ] Closed systemd-hostnamed.socket - Hostname Service Socket.
+[+ 172.2] [  OK  ] Stopped target sysinit.target - System Initialization.
+[+ 172.2] [  OK  ] Stopped target cryptsetup.target - Local Encrypted Volumes.
+[+ 172.2] [  OK  ] Stopped systemd-ask-password-conso…equests to Console Directory Watch.
+[+ 172.2] [  OK  ] Stopped target integritysetup.targ… Local Integrity Protected Volumes.
+[+ 172.2] [  OK  ] Stopped target swap.target - Swaps.
+[+ 172.2] [  OK  ] Stopped target veritysetup.target - Local Verity Protected Volumes.
+[+ 172.2] [  OK  ] Closed systemd-initctl.socket - initctl Compatibility Named Pipe.
+[+ 172.2] [  OK  ] Closed systemd-sysext.socket - System Extension Image Management.
+[+ 172.2]          Starting modprobe@dm_mod.service - Load Kernel Module dm_mod...
+[+ 172.3]          Starting modprobe@loop.service - Load Kernel Module loop...
+[+ 172.3]          Stopping systemd-networkd.service - Network Configuration...
+[+ 172.3] [  OK  ] Stopped systemd-tmpfiles-setup.ser…reate System Files and Directories.
+[+ 172.3] [  OK  ] Stopped target local-fs.target - Local File Systems.
+[+ 172.3] [  OK  ] Stopped target local-fs-pre.target…Preparation for Local File Systems.
+[+ 172.3] [  OK  ] Stopped systemd-udev-trigger.service - Coldplug All udev Devices.
+[+ 172.3] [  OK  ] Stopped systemd-networkd.service - Network Configuration.
+[+ 172.3] [  OK  ] Finished initrd-cleanup.service - …aning Up and Shutting Down Daemons.
+[+ 172.3] [  OK  ] Finished modprobe@dm_mod.service - Load Kernel Module dm_mod.
+[+ 172.4] [  OK  ] Finished modprobe@loop.service - Load Kernel Module loop.
+[+ 172.4] [  OK  ] Stopped target network-pre.target - Preparation for Network.
+[+ 172.4] [  OK  ] Closed systemd-networkd.socket - Network Service Netlink Socket.
+[+ 172.4] [  OK  ] Stopped systemd-sysctl.service - Apply Kernel Variables.
+[+ 172.4] [  OK  ] Stopped systemd-modules-load.service - Load Kernel Modules.
+[+ 172.4]          Stopping systemd-udevd.service - R…ager for Device Events and Files...
+[+ 172.4] [  OK  ] Stopped systemd-udevd.service - Ru…anager for Device Events and Files.
+[+ 172.4] [  OK  ] Closed systemd-udevd-control.socket - udev Control Socket.
+[+ 172.4] [  OK  ] Closed systemd-udevd-kernel.socket - udev Kernel Socket.
+[+ 172.5]          Starting initrd-udevadm-cleanup-db.service - Cleanup udev Database...
+[+ 172.5] [  OK  ] Stopped systemd-network-generator.…ork Units from Kernel Command Line.
+[+ 172.5] [  OK  ] Stopped systemd-tmpfiles-setup-dev…Create Static Device Nodes in /dev.
+[+ 172.5] [  OK  ] Stopped systemd-tmpfiles-setup-dev…ic Device Nodes in /dev gracefully.
+[+ 172.5] [  OK  ] Stopped kmod-static-nodes.service …Create List of Static Device Nodes.
+[+ 172.5] [  OK  ] Stopped systemd-udev-load-credenti…- Load udev Rules from Credentials.
+[+ 172.6] [  OK  ] Finished initrd-udevadm-cleanup-db.service - Cleanup udev Database.
+[+ 172.6] [  OK  ] Reached target initrd-switch-root.target - Switch Root.
+[+ 172.6]          Starting initrd-switch-root.service - Switch Root...
+[+ 174.3] 
+[+ 174.3] Welcome to Debian GNU/Linux 13 (trixie)!
+[+ 174.3] 
+[+ 179.9] [  OK  ] Stopped initrd-switch-root.service - Switch Root.
+[+ 179.9] [  OK  ] Created slice system-getty.slice - Slice /system/getty.
+[+ 180.0] [  OK  ] Created slice system-serial\x2dget…slice - Slice /system/serial-getty.
+[+ 180.0] [  OK  ] Created slice user.slice - User and Session Slice.
+[+ 180.0] [  OK  ] Started systemd-ask-password-conso…equests to Console Directory Watch.
+[+ 180.0] [  OK  ] Started systemd-ask-password-wall.…d Requests to Wall Directory Watch.
+[+ 180.0] [  OK  ] Set up automount proc-sys-fs-binfm…ormats File System Automount Point.
+[+ 180.0]          Expecting device dev-ttyS0.device - /dev/ttyS0...
+[+ 180.0] [  OK  ] Stopped target initrd-switch-root.target - Switch Root.
+[+ 180.0] [  OK  ] Stopped target initrd-fs.target - Initrd File Systems.
+[+ 180.0] [  OK  ] Stopped target initrd-root-fs.target - Initrd Root File System.
+[+ 180.0] [  OK  ] Reached target paths.target - Path Units.
+[+ 180.0] [  OK  ] Reached target remote-fs.target - Remote File Systems.
+[+ 180.0] [  OK  ] Reached target slices.target - Slice Units.
+[+ 180.0] [  OK  ] Reached target swap.target - Swaps.
+[+ 180.0] [  OK  ] Reached target time-set.target - System Time Set.
+[+ 180.0] [  OK  ] Listening on systemd-creds.socket - Credential Encryption/Decryption.
+[+ 180.0] [  OK  ] Listening on systemd-initctl.socke…- initctl Compatibility Named Pipe.
+[+ 180.0] [  OK  ] Listening on systemd-mountfsd.socket - DDI File System Mounter Socket.
+[+ 180.0] [  OK  ] Listening on systemd-networkd.socket - Network Service Netlink Socket.
+[+ 180.0] [  OK  ] Listening on systemd-nsresourced.s… Namespace Resource Manager Socket.
+[+ 180.0] [  OK  ] Listening on systemd-udevd-control.socket - udev Control Socket.
+[+ 180.0] [  OK  ] Listening on systemd-udevd-kernel.socket - udev Kernel Socket.
+[+ 180.0]          Mounting tmp.mount - Temporary Directory /tmp...
+[+ 180.1]          Starting kmod-static-nodes.service…eate List of Static Device Nodes...
+[+ 180.1]          Starting modprobe@configfs.service - Load Kernel Module configfs...
+[+ 180.1]          Starting modprobe@dm_mod.service - Load Kernel Module dm_mod...
+[+ 180.1]          Starting modprobe@drm.service - Load Kernel Module drm...
+[+ 180.1]          Starting modprobe@efi_pstore.servi… - Load Kernel Module efi_pstore...
+[+ 180.3]          Starting modprobe@fuse.service - Load Kernel Module fuse...
+[+ 180.3]          Starting modprobe@loop.service - Load Kernel Module loop...
+[+ 180.3] [  OK  ] Stopped systemd-fsck-usr.service.
+[+ 180.4]          Starting systemd-journald.service - Journal Service...
+[+ 180.4]          Starting systemd-modules-load.service - Load Kernel Modules...
+[+ 180.4]          Starting systemd-network-generator…k Units from Kernel Command Line...
+[+ 180.5]          Starting systemd-remount-fs.servic…unt Root and Kernel File Systems...
+[+ 180.5]          Starting systemd-udev-load-credent…Load udev Rules from Credentials...
+[+ 180.5]          Starting systemd-udev-trigger.service - Coldplug All udev Devices...
+[+ 180.5] [  OK  ] Stopped systemd-veritysetup@usr.service.
+[+ 180.5] [  OK  ] Mounted tmp.mount - Temporary Directory /tmp.
+[+ 180.5] [  OK  ] Finished kmod-static-nodes.service…Create List of Static Device Nodes.
+[+ 180.5] [  OK  ] Finished modprobe@configfs.service - Load Kernel Module configfs.
+[+ 180.6] [  OK  ] Finished modprobe@dm_mod.service - Load Kernel Module dm_mod.
+[+ 180.6] [  OK  ] Finished modprobe@drm.service - Load Kernel Module drm.
+[+ 180.6] [  OK  ] Finished modprobe@efi_pstore.service - Load Kernel Module efi_pstore.
+[+ 180.6] [  OK  ] Finished modprobe@fuse.service - Load Kernel Module fuse.
+[+ 180.6] [  OK  ] Finished modprobe@loop.service - Load Kernel Module loop.
+[+ 180.6] [  OK  ] Finished systemd-modules-load.service - Load Kernel Modules.
+[+ 180.6] [  OK  ] Finished systemd-network-generator…ork Units from Kernel Command Line.
+[+ 180.7] [  OK  ] Finished systemd-remount-fs.servic…mount Root and Kernel File Systems.
+[+ 180.7]          Starting systemd-random-seed.service - Load/Save OS Random Seed...
+[+ 180.7]          Starting systemd-growfs-root.service - Grow Root File System...
+[+ 180.7]          Starting systemd-sysctl.service - Apply Kernel Variables...
+[+ 180.7]          Starting systemd-tmpfiles-setup-de… Device Nodes in /dev gracefully...
+[+ 180.8] [  OK  ] Finished systemd-udev-load-credent…- Load udev Rules from Credentials.
+[+ 180.9] [  OK  ] Finished systemd-random-seed.service - Load/Save OS Random Seed.
+[+ 181.0] [  OK  ] Finished systemd-sysctl.service - Apply Kernel Variables.
+[+ 181.0] [  OK  ] Finished systemd-growfs-root.service - Grow Root File System.
+[+ 181.0] [  OK  ] Started systemd-journald.service - Journal Service.
+[+ 181.0]          Starting systemd-journal-flush.ser…sh Journal to Persistent Storage...
+[+ 181.1] [  OK  ] Finished systemd-tmpfiles-setup-de…ic Device Nodes in /dev gracefully.
+[+ 181.1]          Starting systemd-sysusers.service - Create System Users...
+[+ 181.2] [  OK  ] Finished systemd-journal-flush.ser…lush Journal to Persistent Storage.
+[+ 181.3] [  OK  ] Finished systemd-sysusers.service - Create System Users.
+[+ 181.3]          Starting systemd-tmpfiles-setup-de…eate Static Device Nodes in /dev...
+[+ 181.5] [  OK  ] Finished systemd-tmpfiles-setup-de…Create Static Device Nodes in /dev.
+[+ 181.5] [  OK  ] Reached target local-fs-pre.target…Preparation for Local File Systems.
+[+ 181.5] [  OK  ] Set up automount boot.automount - EFI System Partition Automount.
+[+ 181.5]          Starting systemd-udevd.service - R…ager for Device Events and Files...
+[+ 181.9] [  OK  ] Finished systemd-udev-trigger.service - Coldplug All udev Devices.
+[+ 181.9]          Starting systemd-udev-settle.servi…o Complete Device Initialization...
+[+ 181.9] [  OK  ] Started systemd-udevd.service - Ru…anager for Device Events and Files.
+[+ 181.9] [  OK  ] Reached target local-fs.target - Local File Systems.
+[+ 181.9] [  OK  ] Reached target machines.target - Containers.
+[+ 181.9] [  OK  ] Listening on systemd-bootctl.socket - Boot Entries Service Socket.
+[+ 182.0] [  OK  ] Listening on systemd-importd.socke…Disk Image Download Service Socket.
+[+ 182.0] [  OK  ] Listening on systemd-sysext.socket… System Extension Image Management.
+[+ 182.0]          Starting systemd-binfmt.service - Set Up Additional Binary Formats...
+[+ 182.0]          Starting systemd-boot-random-seed.…- Update Boot Loader Random Seed...
+[+ 182.0]          Starting systemd-boot-update.service - Automatic Boot Loader Update...
+[+ 182.1]          Starting systemd-tmpfiles-setup.se…ate System Files and Directories...
+[+ 182.2] [  OK  ] Created slice system-systemd\x2dfs…slice - Slice /system/systemd-fsck.
+[+ 182.2]          Expecting device dev-disk-by\x2ddi…e - /dev/disk/by-diskseq/9-part1...
+[+ 182.3]          Mounting proc-sys-fs-binfmt_misc.m…cutable File Formats File System...
+[+ 182.3]          Starting modprobe@configfs.service - Load Kernel Module configfs...
+[+ 182.4]          Starting modprobe@fuse.service - Load Kernel Module fuse...
+[+ 182.4] [  OK  ] Finished systemd-tmpfiles-setup.se…reate System Files and Directories.
+[+ 182.5]          Starting ldconfig.service - Rebuild Dynamic Linker Cache...
+[+ 182.5]          Starting systemd-firstboot.service - First Boot Wizard...
+[+ 182.5]          Starting systemd-journal-catalog-u…ervice - Rebuild Journal Catalog...
+[+ 182.6] [  OK  ] Mounted proc-sys-fs-binfmt_misc.mo…xecutable File Formats File System.
+[+ 182.6] [  OK  ] Finished modprobe@configfs.service - Load Kernel Module configfs.
+[+ 182.6] [  OK  ] Finished systemd-binfmt.service - Set Up Additional Binary Formats.
+[+ 182.7] [  OK  ] Finished modprobe@fuse.service - Load Kernel Module fuse.
+[+ 182.7] [  OK  ] Finished systemd-firstboot.service - First Boot Wizard.
+[+ 182.8] [  OK  ] Reached target first-boot-complete.target - First Boot Complete.
+[+ 182.8]          Starting systemd-machine-id-commit…ave Transient machine-id to Disk...
+[+ 182.8] [  OK  ] Finished systemd-journal-catalog-u….service - Rebuild Journal Catalog.
+[+ 183.1] [  OK  ] Finished systemd-machine-id-commit… Save Transient machine-id to Disk.
+[+ 183.5]          Starting systemd-fsck@dev-disk-by\… on /dev/disk/by-diskseq/9-part1...
+[+ 184.0] [  OK  ] Finished systemd-fsck@dev-disk-by\…ck on /dev/disk/by-diskseq/9-part1.
+[+ 184.0]          Mounting boot.mount - EFI System Partition Automount...
+[+ 184.5] [  OK  ] Mounted boot.mount - EFI System Partition Automount.
+[+ 184.6] [  OK  ] Finished systemd-boot-random-seed.…e - Update Boot Loader Random Seed.
+[+ 184.7] [  OK  ] Finished systemd-boot-update.service - Automatic Boot Loader Update.
+[+ 184.7] [  OK  ] Finished ldconfig.service - Rebuild Dynamic Linker Cache.
+[+ 184.7]          Starting systemd-update-done.service - Update is Completed...
+[+ 184.7] [  OK  ] Listening on systemd-rfkill.socket…ll Switch Status /dev/rfkill Watch.
+[+ 184.8] [  OK  ] Finished systemd-udev-settle.servi… To Complete Device Initialization.
+[+ 184.8] [  OK  ] Finished systemd-update-done.service - Update is Completed.
+[+ 184.8] [  OK  ] Reached target sysinit.target - System Initialization.
+[+ 184.8] [  OK  ] Started systemd-tmpfiles-clean.tim…y Cleanup of Temporary Directories.
+[+ 184.8] [  OK  ] Listening on dbus.socket - D-Bus System Message Bus Socket.
+[+ 184.8] [  OK  ] Listening on systemd-hostnamed.socket - Hostname Service Socket.
+[+ 184.8] [  OK  ] Reached target sockets.target - Socket Units.
+[+ 184.8]          Starting signage-config.service - …fig.toml (network, NTP, display)...
+[+ 184.8] [  OK  ] Reached target basic.target - Basic System.
+[+ 184.8]          Starting dbus.service - D-Bus System Message Bus...
+[+ 184.9]          Starting e2scrub_reap.service - Re…ne ext4 Metadata Check Snapshots...
+[+ 184.9] [  OK  ] Started signage-web.service - Loca…gnage host page and OGraf packages.
+[+ 184.9]          Starting systemd-logind.service - User Login Management...
+[+ 185.0] [  OK  ] Started dbus.service - D-Bus System Message Bus.
+[+ 185.0]          Starting wpa_supplicant.service - WPA supplicant...
+[+ 185.2] [  OK  ] Finished e2scrub_reap.service - Re…line ext4 Metadata Check Snapshots.
+[+ 185.4] [  OK  ] Started wpa_supplicant.service - WPA supplicant.
+[+ 185.6] [  OK  ] Started systemd-logind.service - User Login Management.
+[+ 186.4] [  OK  ] Finished signage-config.service - …onfig.toml (network, NTP, display).
+[+ 186.4] [  OK  ] Reached target network-pre.target - Preparation for Network.
+[+ 186.4]          Starting NetworkManager.service - Network Manager...
+[+ 186.5]          Starting chrony.service - chrony, an NTP client/server...
+[+ 186.5]          Starting systemd-networkd.service - Network Configuration...
+[+ 186.8] [  OK  ] Started chrony.service - chrony, an NTP client/server.
+[+ 186.9]          Starting chrony-wait.service - Wai…rony to synchronize system clock...
+[+ 187.0]          Starting systemd-hostnamed.service - Hostname Service...
+[+ 187.2] [  OK  ] Started systemd-networkd.service - Network Configuration.
+[+ 187.2]          Starting systemd-networkd-persiste…tent Storage in systemd-networkd...
+[+ 187.4] [  OK  ] Finished systemd-networkd-persiste…istent Storage in systemd-networkd.
+[+ 187.4] [  OK  ] Started systemd-hostnamed.service - Hostname Service.
+[+ 187.6]          Starting NetworkManager-dispatcher…anager Script Dispatcher Service...
+[+ 187.8] [  OK  ] Started NetworkManager.service - Network Manager.
+[+ 187.8] [  OK  ] Started NetworkManager-dispatcher.… Manager Script Dispatcher Service.
+[+ 187.8] [  OK  ] Reached target network.target - Network.
+[+ 187.8]          Starting systemd-user-sessions.service - Permit User Sessions...
+[+ 187.9] [  OK  ] Finished systemd-user-sessions.service - Permit User Sessions.
+[+ 187.9] [  OK  ] Started getty@tty2.service - Getty on tty2.
+[+ 187.9] [  OK  ] Started serial-getty@ttyS0.service - Serial Getty on ttyS0.
+[+ 188.0] [  OK  ] Reached target getty.target - Login Prompts.
+[+ 188.0] [  OK  ] Started signage-player.service - Signage kiosk (cage + Firefox).
+[+ 188.3]          Starting systemd-nsresourced.service - Namespace Resource Manager...
+[+ 188.9] [  OK  ] Started systemd-nsresourced.service - Namespace Resource Manager.
+[+ 189.1] [  OK  ] Created slice user-991.slice - User Slice of UID 991.
+[+ 189.1]          Starting user-runtime-dir@991.serv… Runtime Directory /run/user/991...
+[+ 189.2] [  OK  ] Finished user-runtime-dir@991.serv…er Runtime Directory /run/user/991.
+[+ 189.2]          Starting user@991.service - User Manager for UID 991...
+[+ 191.2] [  OK  ] Started user@991.service - User Manager for UID 991.
+[+ 191.2] [  OK  ] Started session-c1.scope - Session c1 of User signage.
+[+ 193.0] 
+[+ 193.7] Debian GNU/Linux 13 signage-123456 ttyS0
+[+ 193.7] 
+[+ 193.7] signage-123456 login: root (automatic login)
+[+ 193.7] 
+[+ 193.8] Linux signage-123456 6.12.117+deb13-amd64 #1 SMP PREEMPT_DYNAMIC Debian 6.12.117-1 (2026-11-12) x86_64
+[+ 193.8] 
+[+ 193.8] The programs included with the Debian GNU/Linux system are free software;
+[+ 193.8] the exact distribution terms for each program are described in the
+[+ 193.8] individual files in /usr/share/doc/*/copyright.
+[+ 193.8] 
+[+ 193.8] Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+[+ 193.8] permitted by applicable law.
+[+ 196.5] root@signage-123456:~# 
