@@ -11,7 +11,7 @@ jobs:
       - name: Install mkosi
         run: |
           sudo apt-get update
-          sudo apt-get install -y pipx bubblewrap uidmap zstd xz-utils
+          sudo apt-get install -y pipx bubblewrap uidmap zstd xz-utils debian-archive-keyring
           sudo pipx install --global git+https://github.com/systemd/mkosi.git@v25.3
       - name: Version
         id: v
