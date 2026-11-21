@@ -1,0 +1,46 @@
+# Signage player configuration.
+#
+# Edit this file on any computer, save it, and boot the stick. The installer
+# copies it onto the machine. Settings changed later from the dashboard
+# override what is here.
+
+[device]
+# Shown on the dashboard. Defaults to signage-<last 6 hex digits of the MAC>.
+# name = "lobby-left"
+timezone = "America/New_York"
+
+[dashboard]
+# url = "https://signage.example.com"
+# enroll_token = ""
+
+[network]
+# Wired Ethernet with DHCP is always tried first. WiFi is used when there is
+# no wired link. List as many networks as you like; higher priority wins.
+
+# [[network.wifi]]
+# ssid = "MAGFest-Signage"
+# psk = "change-me"
+# priority = 10
+# hidden = false
+
+[ntp]
+# Extra NTP servers, tried before the public pool (e.g. a venue LAN server).
+servers = []
+
+[display]
+# Leave mode empty to use the monitor's preferred mode.
+# mode = "1920x1080@60"
+# Set custom = true to force a mode the monitor doesn't advertise.
+# custom = false
+# Rotation in degrees: 0, 90, 180 or 270.
+rotation = 0
+# Connector to configure, e.g. "HDMI-A-1" or "DP-1". Default: every output.
+# output = ""
+# scale = 1.0
+
+[install]
+# Disk to install to. Default: the only internal disk, else the first NVMe,
+# else the largest.
+# target = "/dev/nvme0n1"
+# Seconds to wait on screen before wiping the target disk.
+countdown = 15

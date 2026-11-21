@@ -1,0 +1,16 @@
+#!/bin/bash
+# Prints "installer" when booted from an install stick (the disk we booted
+# from carries a SIGNCFG partition), "normal" otherwise.
+# With an argument, exits 0 only if the mode matches it.
+set -uo pipefail
+
+mode=normal
+if disk=$(/usr/lib/signage/boot-disk 2>/dev/null) && lsblk -no PARTLABEL "$disk" | grep -qx SIGNCFG; then
+    mode=installer
+fi
+
+if [[ $# -gt 0 ]]; then
+    [[ $1 == "$mode" ]]
+else
+    echo "$mode"
+fi

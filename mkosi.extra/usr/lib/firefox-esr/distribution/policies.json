@@ -1,0 +1,28 @@
+{
+  "policies": {
+    "DisableAppUpdate": true,
+    "DisableTelemetry": true,
+    "DisableFirefoxStudies": true,
+    "DisablePocket": true,
+    "DontCheckDefaultBrowser": true,
+    "NoDefaultBookmarks": true,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "UserMessaging": {
+      "WhatsNew": false, "ExtensionRecommendations": false, "FeatureRecommendations": false,
+      "UrlbarInterventions": false, "SkipOnboarding": true, "MoreFromMozilla": false
+    },
+    "Preferences": {
+      "browser.sessionstore.resume_from_crash": { "Value": false, "Status": "locked" },
+      "browser.startup.page": { "Value": 0, "Status": "locked" },
+      "toolkit.legacyUserProfileCustomizations.stylesheets": { "Value": true, "Status": "default" },
+      "gfx.webrender.all": { "Value": true, "Status": "default" },
+      "media.autoplay.default": { "Value": 0, "Status": "locked" },
+      "media.autoplay.blocking_policy": { "Value": 0, "Status": "locked" },
+      "dom.disable_open_during_load": { "Value": true, "Status": "locked" },
+      "browser.tabs.warnOnClose": { "Value": false, "Status": "locked" },
+      "app.update.auto": { "Value": false, "Status": "locked" },
+      "datareporting.policy.dataSubmissionEnabled": { "Value": false, "Status": "locked" }
+    }
+  }
+}

@@ -1,0 +1,68 @@
+#!/bin/bash
+# Runs inside cage as the signage user: applies display settings, then
+# starts Firefox full screen.
+set -uo pipefail
+
+DISPLAY_JSON=/run/signage/display.json
+STATUS_DIR=${RUNTIME_DIRECTORY:-/run/signage-kiosk}
+URL=${SIGNAGE_URL:-file://$STATUS_DIR/status.html}
+
+apply_display() {
+    [[ -r $DISPLAY_JSON ]] || return 0
+    local mode custom rotation output scale transform
+    mode=$(jq -r '.mode // ""' "$DISPLAY_JSON")
+    custom=$(jq -r '.custom // false' "$DISPLAY_JSON")
+    rotation=$(jq -r '.rotation // 0' "$DISPLAY_JSON")
+    output=$(jq -r '.output // ""' "$DISPLAY_JSON")
+    scale=$(jq -r '.scale // 1' "$DISPLAY_JSON")
+    case $rotation in 90|180|270) transform=$rotation ;; *) transform=normal ;; esac
+
+    local outputs
+    if [[ -n $output ]]; then
+        outputs=$output
+    else
+        outputs=$(wlr-randr | awk '/^[^ ]/ {print $1}')
+    fi
+    for o in $outputs; do
+        local args=(--output "$o" --transform "$transform" --scale "$scale")
+        if [[ -n $mode ]]; then
+            if [[ $custom == true ]]; then args+=(--custom-mode "$mode"); else args+=(--mode "$mode"); fi
+        fi
+        wlr-randr "${args[@]}" || echo "kiosk: wlr-randr failed for $o" >&2
+    done
+}
+
+# Placeholder status page until the player (step 2) replaces it.
+write_status() {
+    local f=$STATUS_DIR/status.html tmp
+    tmp=$(mktemp "$STATUS_DIR/.status.XXXXXX") || return
+    . /usr/lib/os-release
+    {
+        cat <<HTML
+<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="5">
+<title>signage</title>
+<style>
+body{margin:0;height:100vh;display:grid;place-content:center;background:#101418;color:#e8eef2;
+font:2.2vw/1.5 "DejaVu Sans",sans-serif}
+h1{font-size:4vw;margin:0 0 .5em}dt{color:#8aa0b0}dd{margin:0 0 .6em}code{font-size:1.6vw}
+</style>
+<h1>$(hostname)</h1><dl>
+<dt>Version</dt><dd>${IMAGE_VERSION:-dev}</dd>
+<dt>Addresses</dt><dd>$(ip -o -4 addr show scope global | awk '{print $2": "$4}' | paste -sd ' ' - | sed 's/^$/none/')</dd>
+<dt>Clock</dt><dd>$(date '+%Y-%m-%d %H:%M:%S %Z') ($(chronyc -n tracking 2>/dev/null | awk -F': ' '/Leap status/{print $2}' || echo unknown))</dd>
+<dt>Config</dt><dd><code>$(jq -r '.source + (if (.errors|length)>0 then " — ERRORS: " + (.errors|join("; ")) else "" end)' /run/signage/config-status.json 2>/dev/null)</code></dd>
+<dt>Display</dt><dd><code>$(jq -c . "$DISPLAY_JSON" 2>/dev/null)</code></dd>
+</dl>
+HTML
+    } >"$tmp"
+    chmod 644 "$tmp"
+    mv -f "$tmp" "$f"
+}
+
+apply_display
+write_status
+( while sleep 5; do write_status; done ) &
+
+# Firefox refuses a --profile directory that does not exist yet.
+mkdir -p "$HOME/firefox"
+exec firefox-esr --kiosk --no-remote --profile "$HOME/firefox" "$URL"

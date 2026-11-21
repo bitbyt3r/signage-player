@@ -1,0 +1,20 @@
+[Unit]
+Description=Install the signage player from the USB stick
+After=signage-config.service systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+ConditionPathExists=/run/signage/installer
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/signage/signage-install
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+[Install]
+WantedBy=multi-user.target

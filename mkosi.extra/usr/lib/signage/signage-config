@@ -1,0 +1,310 @@
+#!/usr/bin/python3
+"""Read the player's config.toml and apply it to the system.
+
+  signage-config                  apply (run at boot, before networking)
+  signage-config --check FILE     validate a file, print problems
+  signage-config --get KEY FILE   print one value, e.g. install.target
+
+Where the config comes from:
+  installer mode  config.toml on the stick's SIGNCFG partition
+  normal mode     /var/lib/signage/config.toml (copied there at install),
+                  with /var/lib/signage/overrides.toml (written by the
+                  dashboard agent) layered on top
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+
+STATE = Path("/var/lib/signage")
+RUN = Path("/run/signage")
+NM_DIR = Path("/etc/NetworkManager/system-connections")
+CHRONY_SOURCES = Path("/etc/chrony/sources.d/signage.sources")
+
+ROTATIONS = {0, 90, 180, 270}
+MODE_RE = re.compile(r"^\d+x\d+(@\d+(\.\d+)?)?$")
+NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+
+
+def log(msg):
+    print(f"signage-config: {msg}", file=sys.stderr, flush=True)
+
+
+# ---------------------------------------------------------------- loading
+
+def merge(base, over):
+    out = dict(base)
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def load(path):
+    with open(path, "rb") as f:
+        return tomllib.load(f)
+
+
+def validate(cfg):
+    errs = []
+
+    def typed(section, key, types, check=None, why=""):
+        sec = cfg.get(section, {})
+        if not isinstance(sec, dict):
+            errs.append(f"[{section}] must be a table")
+            return
+        if key not in sec:
+            return
+        v = sec[key]
+        allowed = types if isinstance(types, tuple) else (types,)
+        if not isinstance(v, allowed) or (isinstance(v, bool) and bool not in allowed):
+            errs.append(f"{section}.{key}: wrong type ({type(v).__name__})")
+        elif check and not check(v):
+            errs.append(f"{section}.{key}: {why} (got {v!r})")
+
+    typed("device", "name", str, lambda v: v == "" or NAME_RE.match(v),
+          "use lowercase letters, digits and dashes")
+    typed("device", "timezone", str,
+          lambda v: Path("/usr/share/zoneinfo", v).is_file() or not Path("/usr/share/zoneinfo").exists(),
+          "unknown time zone")
+    typed("dashboard", "url", str, lambda v: v == "" or v.startswith(("http://", "https://")),
+          "must start with http:// or https://")
+    typed("dashboard", "enroll_token", str)
+    typed("ntp", "servers", list, lambda v: all(isinstance(s, str) and s for s in v),
+          "must be a list of host names")
+    typed("display", "mode", str, lambda v: v == "" or MODE_RE.match(v),
+          "use WIDTHxHEIGHT or WIDTHxHEIGHT@HZ")
+    typed("display", "custom", bool)
+    typed("display", "rotation", int, lambda v: v in ROTATIONS, "must be 0, 90, 180 or 270")
+    typed("display", "output", str)
+    typed("display", "scale", (int, float), lambda v: 0.25 <= v <= 4, "must be 0.25 to 4")
+    typed("install", "target", str, lambda v: v == "" or v.startswith("/dev/"), "must be a /dev path")
+    typed("install", "countdown", int, lambda v: 0 <= v <= 600, "must be 0 to 600")
+
+    wifi = cfg.get("network", {}).get("wifi", [])
+    if not isinstance(wifi, list):
+        errs.append("network.wifi must be a list of [[network.wifi]] tables")
+    else:
+        for i, w in enumerate(wifi):
+            where = f"network.wifi[{i}]"
+            if not isinstance(w, dict):
+                errs.append(f"{where}: must be a table")
+                continue
+            ssid = w.get("ssid")
+            if not isinstance(ssid, str) or not 1 <= len(ssid.encode()) <= 32:
+                errs.append(f"{where}.ssid: required, 1 to 32 bytes")
+            psk = w.get("psk", "")
+            if not isinstance(psk, str) or (psk and not 8 <= len(psk) <= 64):
+                errs.append(f"{where}.psk: 8 to 63 characters (or 64 hex), or empty for an open network")
+            if not isinstance(w.get("priority", 0), int):
+                errs.append(f"{where}.priority: must be a whole number")
+            if not isinstance(w.get("hidden", False), bool):
+                errs.append(f"{where}.hidden: must be true or false")
+    return errs
+
+
+def mode():
+    r = subprocess.run(["/usr/lib/signage/signage-mode"], capture_output=True, text=True)
+    return r.stdout.strip() or "normal"
+
+
+def read_stick_config():
+    dev = Path("/dev/disk/by-partlabel/SIGNCFG")
+    if not dev.exists():
+        return None
+    with tempfile.TemporaryDirectory() as mnt:
+        if subprocess.run(["mount", "-o", "ro", str(dev), mnt]).returncode != 0:
+            return None
+        try:
+            p = Path(mnt, "config.toml")
+            return load(p) if p.exists() else None
+        finally:
+            subprocess.run(["umount", mnt])
+
+
+def current_config():
+    if mode() == "installer":
+        cfg = read_stick_config()
+        if cfg is not None:
+            return cfg, "install stick"
+    cfg, src = {}, "defaults"
+    base = STATE / "config.toml"
+    if base.exists():
+        cfg, src = load(base), str(base)
+    over = STATE / "overrides.toml"
+    if over.exists():
+        cfg, src = merge(cfg, load(over)), f"{src} + overrides"
+    return cfg, src
+
+
+# ---------------------------------------------------------------- applying
+
+def write(path, text, mode=0o644):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def primary_mac():
+    best = None
+    for dev in sorted(Path("/sys/class/net").iterdir()):
+        if not (dev / "device").exists():
+            continue  # skip virtual interfaces
+        mac = (dev / "address").read_text().strip()
+        kind = 1 if (dev / "wireless").exists() else 0  # prefer wired
+        if best is None or (kind, dev.name) < best[0]:
+            best = ((kind, dev.name), mac)
+    return best[1] if best else None
+
+
+def apply_hostname(cfg):
+    name = cfg.get("device", {}).get("name") or ""
+    if not name:
+        mac = primary_mac()
+        name = f"signage-{mac.replace(':', '')[-6:]}" if mac else "signage"
+    write(Path("/etc/hostname"), name + "\n")
+    subprocess.run(["hostname", name])
+    return name
+
+
+def apply_timezone(cfg):
+    tz = cfg.get("device", {}).get("timezone") or "America/New_York"
+    lt = Path("/etc/localtime")
+    target = f"../usr/share/zoneinfo/{tz}"
+    if not lt.is_symlink() or os.readlink(lt) != target:
+        tmp = Path("/etc/.localtime.tmp")
+        tmp.unlink(missing_ok=True)
+        tmp.symlink_to(target)
+        os.replace(tmp, lt)
+
+
+def kf(v):
+    """Escape a string value for a GLib keyfile."""
+    return v.replace("\\", "\\\\").replace("\n", "\\n").replace("\t", "\\t")
+
+
+def apply_network(cfg):
+    NM_DIR.mkdir(parents=True, exist_ok=True)
+    wanted = {}
+    # Wired first: NetworkManager prefers the lower route metric, so traffic
+    # uses Ethernet whenever it is plugged in and falls back to WiFi.
+    wanted["signage-wired.nmconnection"] = (
+        "[connection]\nid=signage-wired\ntype=ethernet\n"
+        "autoconnect=true\nautoconnect-priority=100\n\n"
+        "[ethernet]\n\n"
+        "[ipv4]\nmethod=auto\nroute-metric=100\n\n"
+        "[ipv6]\nmethod=auto\nroute-metric=100\naddr-gen-mode=stable-privacy\n"
+    )
+    for i, w in enumerate(cfg.get("network", {}).get("wifi", [])):
+        text = (
+            f"[connection]\nid=signage-wifi-{i}\ntype=wifi\n"
+            f"autoconnect=true\nautoconnect-priority={int(w.get('priority', 0))}\n\n"
+            f"[wifi]\nmode=infrastructure\nssid={kf(w['ssid'])}\n"
+            f"hidden={'true' if w.get('hidden') else 'false'}\n\n"
+        )
+        if w.get("psk"):
+            text += f"[wifi-security]\nkey-mgmt=wpa-psk\npsk={kf(w['psk'])}\n\n"
+        text += (
+            "[ipv4]\nmethod=auto\nroute-metric=600\n\n"
+            "[ipv6]\nmethod=auto\nroute-metric=600\naddr-gen-mode=stable-privacy\n"
+        )
+        wanted[f"signage-wifi-{i}.nmconnection"] = text
+
+    changed = False
+    for f in NM_DIR.glob("signage-*.nmconnection"):
+        if f.name not in wanted:
+            f.unlink()
+            changed = True
+    for name, text in wanted.items():
+        p = NM_DIR / name
+        if not p.exists() or p.read_text() != text:
+            write(p, text, 0o600)
+            changed = True
+    return changed
+
+
+def apply_ntp(cfg):
+    servers = cfg.get("ntp", {}).get("servers", [])
+    text = "".join(f"server {s} iburst prefer\n" for s in servers)
+    if not CHRONY_SOURCES.exists() or CHRONY_SOURCES.read_text() != text:
+        write(CHRONY_SOURCES, text)
+        return True
+    return False
+
+
+def apply_display(cfg):
+    d = cfg.get("display", {})
+    out = {
+        "mode": d.get("mode", ""),
+        "custom": bool(d.get("custom", False)),
+        "rotation": int(d.get("rotation", 0)),
+        "output": d.get("output", ""),
+        "scale": float(d.get("scale", 1.0)),
+    }
+    write(RUN / "display.json", json.dumps(out, indent=2) + "\n")
+
+
+def apply(reload=False):
+    cfg, src = current_config()
+    errs = validate(cfg)
+    if errs:
+        for e in errs:
+            log(f"config error: {e}")
+        log("ignoring the invalid config; using defaults")
+        cfg, src = {}, "defaults (config invalid)"
+    name = apply_hostname(cfg)
+    apply_timezone(cfg)
+    net_changed = apply_network(cfg)
+    ntp_changed = apply_ntp(cfg)
+    apply_display(cfg)
+    status = {
+        "source": src,
+        "errors": errs,
+        "hostname": name,
+        "dashboard": cfg.get("dashboard", {}).get("url", ""),
+    }
+    write(RUN / "config-status.json", json.dumps(status, indent=2) + "\n")
+    log(f"applied config from {src} (hostname {name})")
+    if reload:
+        if net_changed:
+            subprocess.run(["nmcli", "connection", "reload"])
+        if ntp_changed:
+            subprocess.run(["chronyc", "reload", "sources"])
+    return 0
+
+
+def main(argv):
+    if len(argv) >= 2 and argv[1] == "--check":
+        try:
+            errs = validate(load(argv[2]))
+        except tomllib.TOMLDecodeError as e:
+            errs = [f"not valid TOML: {e}"]
+        for e in errs:
+            print(f"  {e}")
+        return 1 if errs else 0
+    if len(argv) >= 2 and argv[1] == "--get":
+        cfg = load(argv[3])
+        v = cfg
+        for part in argv[2].split("."):
+            if not isinstance(v, dict) or part not in v:
+                return 1
+            v = v[part]
+        if v in ("", None):
+            return 1
+        print(v)
+        return 0
+    return apply(reload="--reload" in argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

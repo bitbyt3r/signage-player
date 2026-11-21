@@ -1,0 +1,73 @@
+# The OS image
+
+One mkosi image (Debian trixie, x86_64) does two jobs.
+
+**Install stick.** Flash `signage_<version>.raw` to a USB stick. It holds:
+
+| Partition | What |
+|---|---|
+| ESP (FAT, 512M) | systemd-boot and the UKI |
+| `signage_usr_<v>` (erofs) + `signage_verity_<v>` | read-only `/usr`, checked by dm-verity (`usrhash=` is on the UKI's command line) |
+| `root` (ext4, 1G) | `/etc` from the image, empty `/var` |
+| `SIGNCFG` (FAT32, 256M) | `config.toml` and a README; edit it on any computer |
+
+Booted from the stick, `signage-mode` sees a `SIGNCFG` partition on the boot
+disk and `signage-install.service` takes over tty1: it checks `config.toml`,
+picks the internal disk, counts down (any key cancels), then writes:
+
+| Partition | What |
+|---|---|
+| ESP 512M | copied from the stick |
+| usr A 4G + verity A 128M | copied from the stick, same UUIDs (usrhash finds `/usr` by UUID) |
+| usr B 4G + verity B 128M | empty (`_empty`), for systemd-sysupdate |
+| root (ext4, rest of disk) | `/etc` from `/usr/share/factory/etc`, `config.toml` in `/var/lib/signage/` |
+
+It adds a "Signage" firmware boot entry, makes it first and the next boot,
+and reboots. The stick can be pulled at any point after that.
+
+**Installed player.** `signage-config.service` reads
+`/var/lib/signage/config.toml` (plus `overrides.toml`, which the dashboard
+will write), sets the hostname, time zone, NetworkManager profiles (wired
+DHCP at route metric 100, each WiFi network at 600, so wired wins when
+plugged in) and chrony sources, and writes `/run/signage/display.json`.
+`signage-player.service` runs cage on tty1 as the `signage` user; `kiosk`
+applies resolution/rotation with `wlr-randr` and starts Firefox ESR in kiosk
+mode. Until the player exists it shows a status page.
+
+**Updates.** `systemd-sysupdate` (from `systemd-container`) with `/usr/lib/sysupdate.d/` pulls new `/usr` + verity + UKI from the
+latest GitHub release into the B slot; the UKI gets 3 boot tries before
+systemd-boot falls back. Not yet tested.
+
+## Building
+
+```bash
+scripts/build.sh                    # mkosi.output/signage_<version>.raw
+scripts/build.sh --profile=debug    # + serial console, root shell on tty2/ttyS0
+scripts/qemu-test.sh                # QEMU: image as USB stick + empty NVMe
+scripts/qemu-test.sh --boot-disk    # boot the installed NVMe disk again
+scripts/utm-test.sh                 # same in UTM (AppleScript; less tested)
+```
+
+`qemu-test.sh` gives a serial console on stdio (the debug build logs root in
+there) and the screen on VNC display :1; `--headless` puts the console and the
+QEMU monitor on unix sockets instead, for scripted runs. On macOS it runs in
+the `signage-build` OrbStack machine, so x86_64 is emulated (TCG): the stick
+reaches the installer in about 45 s and Firefox in about a minute.
+
+CI (`.github/workflows/image.yml`) builds a release image on every push.
+Pushing a tag `vX.Y.Z` publishes a GitHub release with the compressed stick
+image, the `/usr` and verity partitions and the UKI, which is what
+`/usr/lib/sysupdate.d/` pulls from.
+
+On macOS the build runs in an x86_64 OrbStack machine (`signage-build`).
+
+## Known gaps
+
+- `/etc` is written once at install. A `/usr` update that changes a file in
+  `/etc` doesn't reach installed players (new system users do, through the
+  generated `sysusers.d/00-image.conf`). Our own settings live in `/usr` or
+  are generated at boot, so this only matters for Debian package defaults.
+- With the stick still plugged in, the stick and the disk carry identical
+  `/usr` partitions (same UUIDs). Both have the same content, so it works,
+  but pull the stick after installing.
+- Secure Boot is not set up; the UKI and verity hash are unsigned.

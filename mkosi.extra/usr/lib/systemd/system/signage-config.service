@@ -1,0 +1,21 @@
+[Unit]
+Description=Apply signage config.toml (network, NTP, display)
+DefaultDependencies=no
+# signage-mode needs the boot disk's by-partuuid links and partition labels,
+# which udev rewrites while it replays the coldplug events.
+After=local-fs.target systemd-udev-trigger.service systemd-udev-settle.service systemd-sysusers.service
+Wants=systemd-udev-settle.service
+Before=network-pre.target NetworkManager.service chrony.service signage-install.service signage-player.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Record the boot mode once, for the installer and player units to check with
+# ConditionPathExists=. (An ExecCondition= there would run with those units'
+# TTY settings, and the player's TTYVHangup= would kill the installer.)
+ExecStart=/bin/sh -c 'mkdir -p /run/signage; rm -f /run/signage/installer; if /usr/lib/signage/signage-mode installer; then touch /run/signage/installer; fi'
+ExecStart=/usr/lib/signage/signage-config
+
+[Install]
+WantedBy=multi-user.target

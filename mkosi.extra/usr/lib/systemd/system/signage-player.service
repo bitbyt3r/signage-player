@@ -1,0 +1,31 @@
+[Unit]
+Description=Signage kiosk (cage + Firefox)
+After=signage-config.service systemd-user-sessions.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+ConditionPathExists=!/run/signage/installer
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cage -d -s -- /usr/lib/signage/kiosk
+Restart=always
+RestartSec=2
+User=signage
+PAMName=cage
+UtmpIdentifier=tty1
+UtmpMode=user
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+Environment=XDG_SESSION_TYPE=wayland MOZ_ENABLE_WAYLAND=1 HOME=/var/lib/signage/home
+StateDirectory=signage/home
+# The kiosk writes its status page here; /run/signage belongs to root.
+RuntimeDirectory=signage-kiosk
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=graphical.target multi-user.target

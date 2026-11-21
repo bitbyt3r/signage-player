@@ -1,0 +1,32 @@
+#!/bin/bash
+# Runs on the build host after everything else has touched the image tree.
+# Keeps a pristine copy of /etc in /usr so the installer (and later a
+# factory reset) can lay down a fresh /etc on a new root partition, and
+# turns every system user into a sysusers.d entry so a /usr update that adds
+# a user also creates it on machines whose /etc predates it.
+set -euo pipefail
+R="$BUILDROOT"
+
+echo uninitialized >"$R/etc/machine-id"
+rm -f "$R/etc/.updated" "$R/var/.updated"
+
+python3 - "$R" <<'PY'
+import sys
+from pathlib import Path
+r = Path(sys.argv[1])
+lines = ["# Generated at image build from /etc/passwd and /etc/group.\n"]
+for l in (r / "etc/group").read_text().splitlines():
+    name, _, gid, _ = l.split(":", 3)
+    if name != "root" and int(gid) < 1000:
+        lines.append(f"g {name} {gid}\n")
+for l in (r / "etc/passwd").read_text().splitlines():
+    name, _, uid, gid, gecos, home, shell = l.split(":")
+    if name != "root" and int(uid) < 1000:
+        gecos = gecos.split(",")[0].replace('"', "") or "-"
+        lines.append(f'u {name} {uid}:{gid} "{gecos}" {home} {shell}\n')
+(r / "usr/lib/sysusers.d/00-image.conf").write_text("".join(lines))
+PY
+
+rm -rf "$R/usr/share/factory/etc"
+mkdir -p "$R/usr/share/factory"
+cp -a "$R/etc" "$R/usr/share/factory/etc"

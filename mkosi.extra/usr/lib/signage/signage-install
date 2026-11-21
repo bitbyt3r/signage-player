@@ -1,0 +1,155 @@
+#!/bin/bash
+# Installs the running image from the install stick onto an internal disk.
+# Runs on tty1 at boot when signage-mode says "installer".
+#
+# Layout written to the target (GPT):
+#   ESP 512M      copied from the stick (systemd-boot + UKI)
+#   usr A 4G      copied from the stick, same UUID (usrhash finds it by UUID)
+#   verity A 128M copied from the stick, same UUID
+#   usr B 4G      empty, label _empty, for systemd-sysupdate
+#   verity B 128M empty, label _empty
+#   root          ext4, rest of disk: /etc from the image, config.toml
+set -euo pipefail
+
+CFG_MNT=/run/signage-install/cfg
+STAGE=/run/signage-install/stage
+DEFS=/run/signage-install/repart.d
+
+say() { printf '%s\n' "$*"; }
+die() { say ""; say "INSTALL FAILED: $*"; say "Power off, fix the problem, and boot the stick again."; sleep infinity; }
+trap 'die "unexpected error on line $LINENO"' ERR
+
+clear || true
+say "=== Signage player installer ($(. /usr/lib/os-release; echo "$IMAGE_VERSION")) ==="
+say ""
+
+BOOT_DISK=$(/usr/lib/signage/boot-disk) || die "cannot work out which disk we booted from"
+say "Install stick: $BOOT_DISK"
+
+part_of() { # part_of DISK PARTLABEL-REGEX -> device
+    lsblk -lnpo NAME,PARTLABEL "$1" | awk -v re="^$2\$" '$2 ~ re {print $1; exit}'
+}
+SRC_ESP=$(lsblk -lnpo NAME,PARTTYPE "$BOOT_DISK" | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print $1; exit}')
+SRC_USR=$(part_of "$BOOT_DISK" 'signage_usr_.*')
+SRC_VERITY=$(part_of "$BOOT_DISK" 'signage_verity_.*')
+SRC_CFG=$(part_of "$BOOT_DISK" 'SIGNCFG')
+for v in SRC_ESP SRC_USR SRC_VERITY SRC_CFG; do
+    [[ -n ${!v} ]] || die "stick is missing a partition ($v)"
+done
+
+# Read config.toml from the stick.
+mkdir -p "$CFG_MNT" "$STAGE/state"
+mount -o ro "$SRC_CFG" "$CFG_MNT"
+if [[ -f $CFG_MNT/config.toml ]]; then
+    # 0600: it holds WiFi passwords, and only root (signage-config) reads it.
+    install -m 0600 "$CFG_MNT/config.toml" "$STAGE/state/config.toml"
+    /usr/lib/signage/signage-config --check "$STAGE/state/config.toml" || die "config.toml on the stick has errors (see above)"
+else
+    install -m 0600 /usr/share/signage/config.example.toml "$STAGE/state/config.toml"
+fi
+umount "$CFG_MNT"
+
+cfg() { /usr/lib/signage/signage-config --get "$1" "$STAGE/state/config.toml"; }
+TARGET=$(cfg install.target || true)
+COUNTDOWN=$(cfg install.countdown || echo 15)
+
+if [[ -z $TARGET ]]; then
+    mapfile -t CANDIDATES < <(
+        lsblk -dbnpo NAME,TYPE,RM,SIZE,TRAN | awk -v boot="$BOOT_DISK" '
+            $2=="disk" && $1!=boot && $3=="0" && $4>=8000000000 && $5!="usb" && $1 !~ /(loop|zram|sr)/ {print $1, $4}'
+    )
+    [[ ${#CANDIDATES[@]} -gt 0 ]] || die "no internal disk found to install to"
+    if [[ ${#CANDIDATES[@]} -eq 1 ]]; then
+        TARGET=${CANDIDATES[0]%% *}
+    elif nvme=$(printf '%s\n' "${CANDIDATES[@]}" | awk '$1 ~ /nvme/ {print $1; exit}') && [[ -n $nvme ]]; then
+        TARGET=$nvme
+    else
+        TARGET=$(printf '%s\n' "${CANDIDATES[@]}" | sort -k2 -n | tail -n1 | cut -d' ' -f1)
+    fi
+fi
+[[ -b $TARGET ]] || die "target $TARGET is not a block device"
+[[ $TARGET != "$BOOT_DISK" ]] || die "refusing to install onto the stick itself"
+
+say "Target disk:  $TARGET ($(lsblk -dno SIZE,MODEL "$TARGET" | xargs))"
+say ""
+say "EVERYTHING ON $TARGET WILL BE ERASED."
+for ((i = COUNTDOWN; i > 0; i--)); do
+    printf '\rInstalling in %2d s. Press any key to cancel. ' "$i"
+    if read -rsn1 -t 1 </dev/tty1; then
+        say ""; say "Cancelled. Power off and remove the stick."; sleep infinity
+    fi
+done
+say ""; say ""
+
+uuid() { lsblk -no PARTUUID "$1"; }
+label() { lsblk -no PARTLABEL "$1"; }
+
+rm -rf "$DEFS"; mkdir -p "$DEFS"
+cat >"$DEFS/00-esp.conf" <<CONF
+[Partition]
+Type=esp
+CopyBlocks=$SRC_ESP
+SizeMinBytes=512M
+SizeMaxBytes=512M
+CONF
+cat >"$DEFS/10-usr-a.conf" <<CONF
+[Partition]
+Type=usr
+Label=$(label "$SRC_USR")
+UUID=$(uuid "$SRC_USR")
+CopyBlocks=$SRC_USR
+SizeMinBytes=4G
+SizeMaxBytes=4G
+CONF
+cat >"$DEFS/11-verity-a.conf" <<CONF
+[Partition]
+Type=usr-verity
+Label=$(label "$SRC_VERITY")
+UUID=$(uuid "$SRC_VERITY")
+CopyBlocks=$SRC_VERITY
+SizeMinBytes=128M
+SizeMaxBytes=128M
+CONF
+cat >"$DEFS/20-usr-b.conf" <<CONF
+[Partition]
+Type=usr
+Label=_empty
+SizeMinBytes=4G
+SizeMaxBytes=4G
+CONF
+cat >"$DEFS/21-verity-b.conf" <<CONF
+[Partition]
+Type=usr-verity
+Label=_empty
+SizeMinBytes=128M
+SizeMaxBytes=128M
+CONF
+cat >"$DEFS/30-root.conf" <<CONF
+[Partition]
+Type=root
+Label=root
+Format=ext4
+CopyFiles=/usr/share/factory/etc:/etc
+MakeSymlinks=/bin:usr/bin /sbin:usr/sbin /lib:usr/lib /lib64:usr/lib64
+CopyFiles=$STAGE/state:/var/lib/signage
+MakeDirectories=/usr /var /home /srv /root /tmp /mnt /efi /boot /proc /sys /dev /run
+CONF
+
+say "Writing partitions..."
+systemd-repart --dry-run=no --empty=force --definitions="$DEFS" "$TARGET"
+udevadm settle
+
+say "Adding firmware boot entry..."
+while read -r num; do efibootmgr -q -b "$num" -B; done < <(efibootmgr | sed -n 's/^Boot\([0-9A-F]\{4\}\)\*\? Signage.*/\1/p')
+esp_num=$(lsblk -lnpo NAME,PARTTYPE "$TARGET" | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print $1; exit}' | grep -o '[0-9]*$')
+efibootmgr -q -c -d "$TARGET" -p "$esp_num" -L "Signage" -l '\EFI\systemd\systemd-bootx64.efi'
+
+new=$(efibootmgr | sed -n 's/^Boot\([0-9A-F]\{4\}\)\*\? Signage.*/\1/p' | head -n1)
+[[ -n $new ]] && efibootmgr -q -n "$new"
+
+sync
+say ""
+say "Installed to $TARGET. Rebooting into it in 10 s."
+say "You can remove the USB stick at any time now."
+sleep 10
+systemctl reboot

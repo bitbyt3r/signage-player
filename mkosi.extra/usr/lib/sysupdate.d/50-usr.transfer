@@ -1,0 +1,17 @@
+# A/B /usr updates. The dashboard will later decide which version each
+# player takes; for now players follow the latest GitHub release.
+[Transfer]
+ProtectVersion=%A
+
+[Source]
+Type=url-file
+Path=https://github.com/bitbyt3r/signage-player/releases/latest/download/
+MatchPattern=signage_@v.usr-x86-64.@u.raw.zst
+
+[Target]
+Type=partition
+Path=auto
+MatchPattern=signage_usr_@v
+MatchPartitionType=usr
+PartitionFlags=0
+ReadOnly=1

@@ -1,0 +1,21 @@
+#!/bin/bash
+# Runs inside the image after packages and mkosi.extra are installed.
+set -euo pipefail
+
+# Files from mkosi.extra keep the checkout's modes; make them sane.
+chmod 0755 /usr/lib/signage /usr/lib/signage/*
+find /usr/lib/systemd/system -name 'signage-*' -exec chmod 0644 {} +
+chmod 0644 /usr/lib/sysusers.d/signage.conf /usr/lib/tmpfiles.d/signage.conf /usr/lib/sysupdate.d/*.transfer
+chmod -R a+rX /usr/share/signage /usr/lib/firefox-esr/distribution
+chmod 0644 /etc/pam.d/cage /etc/chrony/conf.d/signage.conf
+
+systemd-sysusers
+systemctl enable signage-config.service signage-install.service signage-player.service
+systemctl enable NetworkManager.service chrony.service
+systemctl set-default multi-user.target
+# The kiosk owns tty1; the installer prints there too.
+systemctl mask getty@tty1.service
+
+if [[ " ${PROFILES:-} " == *" debug "* ]]; then
+    systemctl enable serial-getty@ttyS0.service getty@tty2.service
+fi
