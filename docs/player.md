@@ -12,6 +12,7 @@ build step:
 | `player.mjs` | polling, layers, transitions |
 | `display.mjs` | the display layout: an ordinary screen, or the arch canvas sliced to the LED controller |
 | `layouts.mjs` | the geometry table for sliced layouts (also read by `scripts/ograf-preview.html`) |
+| `perf.mjs` | frame timing stats and what was on screen, posted to signage-web every 5 s |
 | `eligibility.mjs` | when an item may play (pure; unit tests in `tests/player/`) |
 | `status.mjs` | status files, dashboard line and update bar (shared with `/host/`) |
 
@@ -26,11 +27,13 @@ kiosk's Firefox profile under `/var/lib/signage/home`.
 | `/packages/<id>/<version>/…` | `/var/lib/signage/packages/` (the dashboard's packages), else the image's `/usr/share/signage/packages/` |
 | `/status/status.json` | the kiosk's device status (hostname, version, addresses, clock, config, display) |
 | `/status/agent.json`, `/status/update.json` | the dashboard agent's connection and OS update progress (`/run/signage/`) |
+| `/status/perf.json` | the player's last frame timing summary (below), read-only |
+| `POST /perf` | the player's frame timing summary; the only thing `signage-web` writes |
 | `/status/display.json` | `signage-config`'s display settings, including `layout` (`/run/signage/display.json`) |
 | `/player/`, `/host/` | `/usr/share/signage/` |
 
 Nothing else under `/var/lib/signage` is served (`config.toml` has the
-WiFi passwords).
+WiFi passwords). The only write is `POST /perf` (below).
 
 ## content.json
 
@@ -241,9 +244,70 @@ v0.1.2, rebooting…". A failure shows in red with the error for a minute.
 After the reboot, the boot banner on tty1 says "Updated to v0.1.2 (was
 v0.1.1)".
 
+## Performance stats
+
+`perf.mjs` runs a `requestAnimationFrame` loop for the page's lifetime and
+records each frame interval in a preallocated ring (no allocation per
+frame; nothing is measured while the page is hidden). About every 5 s it
+summarises the frames since the last summary and POSTs it to `/perf`,
+fire and forget. Errors never reach the player.
+
+`signage-web` accepts `POST /perf` from 127.0.0.1 only, up to 4 KB, and only
+a JSON object with the fields below (anything else is a 400). It writes the
+body atomically to `/run/signage-web/perf.json` (mode 0644) and answers
+204. signage-web runs as a systemd `DynamicUser`, so that's its
+`RuntimeDirectory`; `tmpfiles.d/signage.conf` links it as
+`/run/signage/perf.json`, which is where the dashboard agent reads it. The
+agent ignores a file whose `t` is more than 30 s old, and samples CPU,
+memory and temperatures itself. `/status/perf.json` shows the latest
+summary, for testing.
+
+```jsonc
+{
+  "t": 1795427012.547,        // unix seconds when the window ended
+  "window": 5,                // seconds of frames covered
+  "frames": 300,
+  "fps": 60,                  // frames / window
+  "frame_ms": {"p50": 16.7, "p95": 16.8, "p99": 17.3, "max": 17.5},
+  "long_frames": 0,           // frames over 50 ms
+  "renderer": "firefox-esr 153.0",
+  "layout": "screen",         // or "arch"
+  "active": [                 // what was on screen during the window
+    {"layer": 20, "layer_name": "Lower thirds", "package": "magfest-lower-third",
+     "version": "1.1.0", "label": "Main stage", "from": 1795427007.543, "to": null},
+    {"layer": -1, "layer_name": "status", "package": "status-screen",
+     "from": 1795427007.543, "to": 1795427009.1}
+  ]
+}
+```
+
+Any field may be missing (an empty window has only `window: 0` and
+`frames: 0`).
+
+`active` has one entry per graphic per layer that was visible at any point
+in the window, so the dashboard can show what was playing at a point on
+its frame-time chart:
+
+- A graphic counts as visible from when its `playAction()` resolves until
+  its `stopAction()` starts.
+- `layer` is the program's numeric layer, `layer_name` its name. The status
+  screen is `{"layer": -1, "layer_name": "status", "package":
+  "status-screen"}` while it shows.
+- `from` is clipped to the window's start. `to` is when it went away, or
+  `null` if it's still showing.
+- `label` is the item's label, left out when there is none.
+- Front layer (highest `layer`) first, at most 32 entries. If the body
+  would be over 4 KB, back-layer entries are dropped.
+
+Checked in Firefox ESR 153 headless with the demo program for 35 s:
+`perf.json` was rewritten every 5 s, with 300 frames per window at 60 fps,
+p50 16.7 ms, p99 at most 17.4 ms and no long frames. The first window
+listed the status screen's 8 ms before the demo lower third started.
+
 ## Testing
 
-- Unit tests: `node --test tests/player/`
+- Unit tests: `node --test tests/player/` (eligibility, and the perf
+  summary and `active` list)
 - In a desktop browser: run `signage-web` against fixture directories. Its
   paths come from the environment:
 

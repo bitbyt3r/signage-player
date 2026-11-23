@@ -13,19 +13,58 @@ offline caches in its localStorage).
                  agent.json (/usr/share/signage/status -> /run/signage-kiosk)
   everything else from /usr/share/signage (/player/, /host/)
 
+The one write: the player POSTs its frame timing summary to /perf (from
+127.0.0.1 only, a small JSON object, checked field by field). It goes to
+$RUNTIME_DIRECTORY/perf.json (/run/signage-web/perf.json, linked as
+/run/signage/perf.json for the dashboard agent) and is readable as
+/status/perf.json. See docs/player.md ("Performance stats").
+
 Nothing else under /var/lib/signage is reachable (config.toml has the WiFi
 passwords). Everything is sent no-cache: it's all local, and a package
 version or content.json can change under the same URL during development.
 """
 import http.server
+import json
+import math
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 STATE = Path(os.environ.get("SIGNAGE_STATE", "/var/lib/signage"))
 SHARE = Path(os.environ.get("SIGNAGE_SHARE", "/usr/share/signage"))
 PORT = int(os.environ.get("SIGNAGE_WEB_PORT", "8080"))
 BIND = os.environ.get("SIGNAGE_WEB_BIND", "127.0.0.1")
+# systemd's RuntimeDirectory=signage-web (signage-web runs as a DynamicUser,
+# so it can't write /run/signage itself).
+RUNTIME = Path(os.environ.get("RUNTIME_DIRECTORY", "/run/signage-web").split(":")[0])
+PERF = RUNTIME / "perf.json"
+# The player trims its "active" list to stay under this.
+PERF_MAX = 4096
+
+
+def _num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _str(n):
+    return lambda v: isinstance(v, str) and len(v) <= n
+
+
+_ACTIVE = {"layer": _num, "layer_name": _str(128), "package": _str(128), "version": _str(64),
+           "label": _str(200), "from": _num, "to": lambda v: v is None or _num(v)}
+_PERF = {
+    "t": _num, "window": _num, "frames": _num, "fps": _num, "long_frames": _num,
+    "frame_ms": lambda v: isinstance(v, dict) and len(v) <= 8 and all(isinstance(k, str) and _num(x) for k, x in v.items()),
+    "renderer": _str(80), "layout": _str(16),
+    "active": lambda v: isinstance(v, list) and len(v) <= 32 and all(
+        isinstance(a, dict) and set(a) <= set(_ACTIVE) and all(_ACTIVE[k](x) for k, x in a.items()) for a in v),
+}
+
+
+def valid_perf(d):
+    """The player's perf summary: a JSON object of known, typed fields."""
+    return isinstance(d, dict) and set(d) <= set(_PERF) and all(_PERF[k](v) for k, v in d.items())
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -42,11 +81,41 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         parts = rel.parts
         if parts[:1] == ("content.json",):
             return str(STATE / "content.json")
+        if parts == ("status", "perf.json"):
+            return str(PERF)
         if parts[:1] == ("packages",):
             dl = STATE.joinpath(*parts)
             if dl.exists():
                 return str(dl)
         return str(SHARE.joinpath(*parts))
+
+    def do_POST(self):
+        if self.path.split("?")[0] != "/perf":
+            return self.send_error(404)
+        if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+            return self.send_error(403)
+        try:
+            n = int(self.headers.get("Content-Length", ""))
+        except ValueError:
+            return self.send_error(411)
+        if not 0 < n <= PERF_MAX:
+            return self.send_error(413)
+        try:
+            data = json.loads(self.rfile.read(n))
+        except ValueError:
+            return self.send_error(400, "not JSON")
+        if not valid_perf(data):
+            return self.send_error(400, "unexpected fields")
+        try:
+            fd, tmp = tempfile.mkstemp(dir=RUNTIME, prefix=".perf.")
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f, separators=(",", ":"))
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, PERF)
+        except OSError as e:
+            return self.send_error(500, str(e))
+        self.send_response(204)
+        self.end_headers()
 
     def list_directory(self, path):
         self.send_error(404)

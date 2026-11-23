@@ -6,6 +6,10 @@ Before=signage-player.service
 [Service]
 ExecStart=/usr/lib/signage/signage-web
 DynamicUser=yes
+# The one thing it writes: the player's frame stats, perf.json (also
+# linked as /run/signage/perf.json, see tmpfiles.d/signage.conf).
+RuntimeDirectory=signage-web
+RuntimeDirectoryMode=0755
 ProtectSystem=strict
 ProtectHome=yes
 PrivateDevices=yes

@@ -4,6 +4,7 @@
 import { isEligible, problems } from "./eligibility.mjs";
 import { esc, getJson, dashboardState, startUpdateBar } from "./status.mjs";
 import { setupDisplay, wantedLayout } from "./display.mjs";
+import { startPerf, markVisible, markHidden } from "./perf.mjs";
 
 const params = new URLSearchParams(location.search);
 const DEMO = params.get("demo") === "1";
@@ -101,6 +102,7 @@ class LayerRunner {
     apply(def) {
         this.def = def;
         this.name = def.name || `layer ${def.layer}`;
+        this.perfKey ??= `layer:${Math.random()}`; // perf.mjs's on-screen list
         this.items = Array.isArray(def.items) ? def.items : [];
         this.container.style.zIndex = String(Number(def.layer) || 0);
         this.container.dataset.layer = this.name;
@@ -205,6 +207,7 @@ class LayerRunner {
         const cur = this.current;
         if (!cur) return;
         this.current = null;
+        markHidden(this.perfKey);
         try {
             checkResult(await withTimeout(cur.el.stopAction?.({}), T_STOP, "stopAction"), "stopAction");
         } catch (e) { warn(`${this.name}: ${itemName(cur.item)}: ${e.message}`); }
@@ -231,6 +234,8 @@ class LayerRunner {
             this.current = cur;
             checkResult(await withTimeout(g.el.playAction({}), T_PLAY, "playAction"), "playAction");
             cur.started = Date.now();
+            markVisible(this.perfKey, { layer: Number(this.def.layer) || 0, layer_name: this.name,
+                package: item.package, version: item.version, label: item.label });
             log(`${this.name}: playing ${itemName(item)}`);
         } catch (e) {
             this.fail(item, e);
@@ -248,6 +253,7 @@ class LayerRunner {
         this.closed = true;
         while (this.busy) await sleep(100);
         await this.takeDown();
+        markHidden(this.perfKey);
         this.container.remove();
     }
 }
@@ -315,6 +321,8 @@ function setStatusShown(show) {
     if (show === statusShown) return;
     statusShown = show;
     statusEl.hidden = !show;
+    if (show) markVisible("status", { layer: -1, layer_name: "status", package: "status-screen" });
+    else markHidden("status");
     clearInterval(statusTimer);
     if (show) { renderStatus(); statusTimer = setInterval(renderStatus, 5000); }
 }
@@ -345,6 +353,7 @@ function tick() {
 }
 
 startUpdateBar(document.getElementById("update"));
+startPerf();
 setStatusShown(true);
 await poll();
 setInterval(poll, POLL_MS);
