@@ -211,6 +211,19 @@ function fieldInput(key, s, value, values) {
     el.getValue = () => (el.value === "" ? undefined : Number(el.value));
     return el;
   }
+  if (s.type === "array" && s["x-signage-editor"] === "lines") {
+    // Long lists (hundreds of names): one item per line.
+    const lines = Array.isArray(value) ? value.map(String) : typeof value === "string" ? value.split("\n") : [];
+    const ta = h("textarea", { class: "lines-edit" });
+    ta.value = lines.join("\n");
+    const count = h("span", { class: "muted small" });
+    const upd = () => { count.textContent = `${ta.value.split("\n").filter((x) => x.trim()).length} items, one per line`; };
+    ta.addEventListener("input", upd);
+    upd();
+    const wrap = h("div", { class: "lines-field" }, ta, count);
+    wrap.getValue = () => ta.value.split("\n").map((x) => x.trim()).filter(Boolean);
+    return wrap;
+  }
   if (isStringArray(s) || (s.type === "string" && spec)) {
     const multiple = s.type === "array";
     const el = picker({ values: multiple ? (Array.isArray(value) ? value.map(String) : []) : (value ? [String(value)] : []), multiple,
@@ -270,7 +283,7 @@ function fieldInput(key, s, value, values) {
 }
 
 function fieldRow(key, s, input, extra) {
-  const wide = input.classList?.contains("picker") || input.classList?.contains("md-field") || input.classList?.contains("obj-list") || input.tagName === "TEXTAREA" || (s.type === "object");
+  const wide = input.classList?.contains("picker") || input.classList?.contains("md-field") || input.classList?.contains("lines-field") || input.classList?.contains("obj-list") || input.tagName === "TEXTAREA" || (s.type === "object");
   return h("div", { class: "param" + (wide ? " wide" : ""), "data-key": key },
     h("label", { class: "field" },
       h("span", {}, s.title || key, extra || ""),
