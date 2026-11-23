@@ -44,7 +44,7 @@ Answer the prompts:
 | Parameter AdminPassword | the dashboard password (12+ characters) |
 | Parameter EnrollToken | a long random string, e.g. the output of `openssl rand -hex 24`. It goes onto install sticks; anyone with it can enroll a device. |
 | Parameter GitHubRepo | `bitbyt3r/signage-player` (enables the Install images page) |
-| Parameter GitHubToken | a [fine-grained token](https://github.com/settings/personal-access-tokens/new) for that repo with **Contents: Read-only**. Needed because the repo is private. |
+| Parameter GitHubToken | leave blank (the repo is public). Optional: a [fine-grained token](https://github.com/settings/personal-access-tokens/new) with public read access lifts GitHub's 60 requests/hour limit for anonymous API calls, if the Install images page ever reports a 403. |
 | Confirm changes before deploy | `y` |
 | Allow SAM CLI IAM role creation | `y` |
 | ApiFunction has no authentication. Is this okay? | `y` (the app checks the password and device tokens itself) |
@@ -80,11 +80,18 @@ Either:
   dashboard* once per release (it streams the image from GitHub into S3,
   about a minute), fill in WiFi and display settings, and click *Download
   pre-configured image*. The `.img` has `config.toml` (with this dashboard's
-  URL and the enroll token) already in its FAT32 partition. Flash it with
-  balenaEtcher, Raspberry Pi Imager or `dd`. The download is built in your
-  browser chunk by chunk and written straight to disk, so it never sits in
-  memory. Chrome and Edge ask where to save it; Firefox and Safari save it as
-  a normal download.
+  URL and the enroll token) already in its FAT32 partition. The default is
+  a compressed `.img.gz`, which is roughly the size of the release's `.xz`
+  instead of the full ~2.3 GB disk image. balenaEtcher and Raspberry Pi
+  Imager flash it as is; with `dd`, use
+  `gunzip -c signage_….img.gz | sudo dd of=/dev/rdiskN bs=4m`. The plain
+  `.img` is still offered. Either way the download is built in your browser
+  chunk by chunk and written straight to disk, so it never sits in memory.
+  Chrome and Edge ask where to save it; Firefox and Safari save it as a
+  normal download. (How: when copying a release, the dashboard also stores
+  gzip copies of everything before and after the config partition; the
+  browser compresses only the new config partition and joins the three
+  pieces, which is a valid multi-member gzip file.)
 - **By hand**: flash a release image, open the `SIGNCFG` drive on any
   computer, and set in `config.toml`:
 

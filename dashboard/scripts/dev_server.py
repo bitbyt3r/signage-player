@@ -67,9 +67,25 @@ def main():
         with open(raw, "rb") as f:
             ss, parts = mirror.parse_gpt(f.read(1 << 20))
         cfg = next(p for p in parts if p["label"] == "SIGNCFG")
+        import gzip
+        import tempfile
+        gz = {}
+        with open(raw, "rb") as f, tempfile.TemporaryDirectory() as td:
+            for which, lo, hi in (("head", 0, cfg["offset"]), ("tail", cfg["offset"] + cfg["size"], raw.stat().st_size)):
+                out = Path(td, which)
+                f.seek(lo)
+                with gzip.open(out, "wb", compresslevel=6) as g:
+                    left = hi - lo
+                    while left:
+                        b = f.read(min(left, 8 << 20))
+                        g.write(b)
+                        left -= len(b)
+                s3.upload_file(str(out), "signage-dev", f"{key}.{which}.gz")
+                gz[f"gz_{which}_key"] = f"{key}.{which}.gz"
+                gz[f"gz_{which}_size"] = out.stat().st_size
         common.put({"pk": "RELEASE#v0.0.1", "sk": "META", "kind": "release", "data": common.dumps({
             "tag": "v0.0.1", "state": "ready", "key": key, "filename": raw.name, "size": raw.stat().st_size,
-            "sector_size": ss, "config_offset": cfg["offset"], "config_size": cfg["size"], "partitions": parts})})
+            "sector_size": ss, "config_offset": cfg["offset"], "config_size": cfg["size"], "partitions": parts, **gz})})
         app.GITHUB_REPO = "example/signage-player"
         app.github = lambda path: [{"tag_name": "v0.0.1", "name": "v0.0.1", "published_at": "2026-11-23T00:00:00Z",
                                     "assets": [{"name": "signage_0.0.1.raw.xz", "size": 123456789}]}]

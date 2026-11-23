@@ -52,6 +52,16 @@ def test_mirror_streams_xz_to_s3(aws, tmp_path, monkeypatch):  # noqa: F811
     body = boto3.client("s3").get_object(Bucket="signage-test", Key=st["key"])["Body"].read()
     assert hashlib.sha256(body).digest() == hashlib.sha256(raw).digest()
     assert json.loads(common.get("RELEASE#v0.1")["data"])["state"] == "ready"
+    # head.gz + gzip(config partition) + tail.gz is a multi-member gzip of the whole image.
+    import gzip
+    get = lambda k: boto3.client("s3").get_object(Bucket="signage-test", Key=k)["Body"].read()  # noqa: E731
+    head, tail = get(st["gz_head_key"]), get(st["gz_tail_key"])
+    assert len(head) == st["gz_head_size"] and len(tail) == st["gz_tail_size"]
+    lo, hi = st["config_offset"], st["config_offset"] + st["config_size"]
+    assert gzip.decompress(head) == raw[:lo] and gzip.decompress(tail) == raw[hi:]
+    whole = head + gzip.compress(raw[lo:hi]) + tail
+    assert gzip.decompress(whole) == raw
+    assert len(whole) < len(raw) // 3
 
 
 def test_asset_redirect_drops_auth(monkeypatch):

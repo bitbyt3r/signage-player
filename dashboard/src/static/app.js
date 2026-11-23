@@ -1,5 +1,5 @@
 // Signage dashboard: a small hash-routed single page app, no build step.
-import { imageStream, saveStream } from "./image.js";
+import { gzImageStream, imageStream, saveStream } from "./image.js";
 
 const $main = document.getElementById("main");
 let info = null;
@@ -734,7 +734,7 @@ async function viewImages() {
     } catch (e) { err.replaceChildren(h("div", { class: "bad" }, e.message), errorList(e)); }
   };
 
-  const downloadImage = async (tag) => {
+  const downloadImage = async (tag, compressed) => {
     err.replaceChildren();
     let text, img;
     try {
@@ -743,17 +743,28 @@ async function viewImages() {
     } catch (e) { return err.replaceChildren(h("div", { class: "bad" }, e.message), errorList(e)); }
     const readme = await fetch("/static/README-config.txt").then((r) => r.text()).catch(() => "Edit config.toml, then boot the stick.\n");
     const files = [{ name: "config.toml", data: enc.encode(text) }, { name: "README.txt", data: enc.encode(readme) }];
-    const filename = img.filename.replace(/\.raw$/, "") + (name.value.trim() ? `-${name.value.trim()}` : "") + ".img";
+    const filename = img.filename.replace(/\.raw$/, "") + (name.value.trim() ? `-${name.value.trim()}` : "") + (compressed ? ".img.gz" : ".img");
     progress.hidden = false;
     const started = Date.now();
     try {
-      await saveStream(filename, img.size, imageStream({ url: img.url, size: img.size, configOffset: img.config_offset, configSize: img.config_size, files }),
+      let size = img.size;
+      let stream;
+      if (compressed) {
+        progressText.textContent = "Building the config partition…";
+        ({ size, stream } = await gzImageStream({ headUrl: img.gz_head_url, headSize: img.gz_head_size, tailUrl: img.gz_tail_url,
+          tailSize: img.gz_tail_size, configOffset: img.config_offset, configSize: img.config_size, files }));
+      } else {
+        stream = imageStream({ url: img.url, size: img.size, configOffset: img.config_offset, configSize: img.config_size, files });
+      }
+      await saveStream(filename, size, stream,
         (done, total) => {
           progress.firstChild.style.width = `${(100 * done) / total}%`;
           const rate = done / Math.max(1, (Date.now() - started) / 1000);
           progressText.textContent = `${bytes(done)} of ${bytes(total)} · ${bytes(rate)}/s`;
         });
-      progressText.textContent = `Saved ${filename}. Flash it with balenaEtcher, Raspberry Pi Imager or dd.`;
+      progressText.textContent = compressed
+        ? `Saved ${filename}. Flash it as is with balenaEtcher or Raspberry Pi Imager, or: gunzip -c ${filename} | sudo dd of=/dev/rdiskN bs=4m`
+        : `Saved ${filename}. Flash it with balenaEtcher, Raspberry Pi Imager or dd.`;
     } catch (e) {
       progressText.textContent = "";
       if (e.name !== "AbortError") err.replaceChildren(h("div", { class: "bad" }, e.message));
@@ -773,7 +784,19 @@ async function viewImages() {
       h("tbody", {}, r.releases.map((rel) => {
         const m = rel.mirror;
         let action;
-        if (m?.state === "ready") action = h("button", { class: "primary small", onclick: () => downloadImage(rel.tag) }, "Download pre-configured image");
+        const recopy = (label) => h("button", { class: "small", onclick: async () => {
+          try { await api("POST", `/api/releases/${encodeURIComponent(rel.tag)}/mirror`); loadReleases(); } catch (e) { toast(e.message); }
+        } }, label);
+        if (m?.state === "ready" && m.gz_head_key) {
+          const gzSize = m.gz_head_size + m.gz_tail_size;
+          action = h("div", { class: "row" },
+            h("button", { class: "primary small", onclick: () => downloadImage(rel.tag, true) }, `Download .img.gz (~${bytes(gzSize)})`),
+            h("button", { class: "small", onclick: () => downloadImage(rel.tag, false) }, `.img (${bytes(m.size)})`));
+        } else if (m?.state === "ready") {
+          action = h("div", { class: "row" },
+            h("button", { class: "primary small", onclick: () => downloadImage(rel.tag, false) }, `Download .img (${bytes(m.size)})`),
+            recopy("Copy again for a compressed download"));
+        }
         else if (m?.state === "queued" || m?.state === "copying") action = h("span", { class: "muted small" }, `Copying from GitHub… ${m.copied ? bytes(m.copied) : ""}`);
         else if (rel.asset) action = h("span", {}, h("button", { class: "small", onclick: async () => {
           try { await api("POST", `/api/releases/${encodeURIComponent(rel.tag)}/mirror`); loadReleases(); } catch (e) { toast(e.message); }

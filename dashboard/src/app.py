@@ -757,8 +757,12 @@ def release_image(req, tag):
     st = c.loads(m["data"]) if m else {}
     if st.get("state") != "ready":
         raise HttpError(409, "this release isn't copied to the dashboard yet")
-    st["url"] = c.s3().generate_presigned_url(
-        "get_object", Params={"Bucket": c.BUCKET, "Key": st["key"]}, ExpiresIn=6 * 3600)
+    sign = lambda key: c.s3().generate_presigned_url(  # noqa: E731
+        "get_object", Params={"Bucket": c.BUCKET, "Key": key}, ExpiresIn=6 * 3600)
+    st["url"] = sign(st["key"])
+    if st.get("gz_head_key"):
+        st["gz_head_url"] = sign(st["gz_head_key"])
+        st["gz_tail_url"] = sign(st["gz_tail_key"])
     return resp(200, st)
 
 

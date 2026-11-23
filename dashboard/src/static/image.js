@@ -124,3 +124,35 @@ export async function saveStream(filename, size, gen, onProgress) {
     document.body.appendChild(iframe);
   });
 }
+
+// Compressed variant: the dashboard stores gzip members of the image before
+// and after SIGNCFG, so the output is head.gz + gzip(new FAT32) + tail.gz, a
+// valid multi-member gzip file. Only the compressed bytes are downloaded, and
+// the new FAT32 (mostly zeros) compresses to a few hundred KB in memory.
+export async function gzImageStream({ headUrl, headSize, tailUrl, tailSize, configOffset, configSize, files, signal }) {
+  const fs = makeFat32(configSize, files, { label: "SIGNCFG", hiddenSectors: configOffset / 512 });
+  if (fs.size !== configSize) throw new Error("config partition size is not a whole number of sectors");
+  const cs = new CompressionStream("gzip");
+  const writer = cs.writable.getWriter();
+  const pieces = [];
+  const reading = (async () => {
+    const reader = cs.readable.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pieces.push(value);
+    }
+  })();
+  for (let off = 0; off < configSize; off += CHUNK) await writer.write(fs.read(off, Math.min(CHUNK, configSize - off)));
+  await writer.close();
+  await reading;
+  const fatGz = new Uint8Array(pieces.reduce((n, p) => n + p.length, 0));
+  let o = 0;
+  for (const p of pieces) { fatGz.set(p, o); o += p.length; }
+  async function* gen() {
+    yield* rechunk(remote(headUrl, 0, headSize, signal));
+    yield fatGz;
+    yield* rechunk(remote(tailUrl, 0, tailSize, signal));
+  }
+  return { size: headSize + fatGz.length + tailSize, stream: gen() };
+}

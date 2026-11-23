@@ -20,6 +20,7 @@ import traceback
 import urllib.error
 import urllib.request
 import uuid
+import zlib
 
 import common as c
 
@@ -102,7 +103,50 @@ def handler(event, context=None):
         raise
 
 
+class Upload:
+    """Streams bytes into one S3 object with a multipart upload."""
+
+    def __init__(self, key, ctype):
+        self.s3, self.key = c.s3(), key
+        self.id = self.s3.create_multipart_upload(Bucket=c.BUCKET, Key=key, ContentType=ctype)["UploadId"]
+        self.parts, self.buf, self.size = [], bytearray(), 0
+
+    def _part(self, body):
+        n = len(self.parts) + 1
+        e = self.s3.upload_part(Bucket=c.BUCKET, Key=self.key, UploadId=self.id, PartNumber=n, Body=body)
+        self.parts.append({"PartNumber": n, "ETag": e["ETag"]})
+
+    def write(self, data):
+        self.buf += data
+        self.size += len(data)
+        while len(self.buf) >= PART:
+            self._part(bytes(self.buf[:PART]))
+            del self.buf[:PART]
+
+    def close(self):
+        if self.buf or not self.parts:
+            self._part(bytes(self.buf))
+        self.s3.complete_multipart_upload(Bucket=c.BUCKET, Key=self.key, UploadId=self.id,
+                                          MultipartUpload={"Parts": self.parts})
+        return self.size
+
+    def abort(self):
+        try:
+            self.s3.abort_multipart_upload(Bucket=c.BUCKET, Key=self.key, UploadId=self.id)
+        except Exception:
+            pass
+
+
+def config_partition(gpt):
+    return next((p for p in gpt if p["label"] == "SIGNCFG"), None) \
+        or next((p for p in gpt if p["type"] == CONFIG_TYPE), None)
+
+
 def mirror(tag):
+    """Stores three objects: the raw image, and gzip members of everything
+    before and after the SIGNCFG partition. The browser builds a compressed
+    pre-configured image by concatenating head.gz + gzip(new FAT32) + tail.gz,
+    which is a valid multi-member gzip file."""
     with urllib.request.urlopen(gh_request(f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{tag}"),
                                 timeout=20) as r:
         release = json.loads(r.read())
@@ -111,60 +155,81 @@ def mirror(tag):
     if not asset:
         raise ValueError("release has no signage_<version>.raw.xz asset")
     name = asset["name"][:-3]
-    key = f"images/{tag}/{name}"
+    base = f"images/{tag}/{name}"
     set_state(tag, state="copying", asset=asset["name"], xz_size=asset["size"], copied=0)
 
-    s3 = c.s3()
-    mp = s3.create_multipart_upload(Bucket=c.BUCKET, Key=key, ContentType="application/octet-stream")
-    parts, buf, total, head, layout = [], bytearray(), 0, bytearray(), None
+    raw = Upload(base, "application/octet-stream")
+    uploads = [raw]
+    st = {"pos": 0, "layout": None, "cfg": None, "pre": bytearray()}
+    zh = zlib.compressobj(6, zlib.DEFLATED, 31)
+    zt = zlib.compressobj(6, zlib.DEFLATED, 31)
+
+    def start(head_bytes):
+        st["layout"] = parse_gpt(bytes(head_bytes))
+        st["cfg"] = config_partition(st["layout"][1])
+        if not st["cfg"]:
+            raise ValueError("no SIGNCFG partition in the image")
+        st["head"] = Upload(f"{base}.head.gz", "application/gzip")
+        st["tail"] = Upload(f"{base}.tail.gz", "application/gzip")
+        uploads.extend([st["head"], st["tail"]])
+
+    def feed(data):
+        cfg = st["cfg"]
+        lo, hi = cfg["offset"], cfg["offset"] + cfg["size"]
+        a = st["pos"]
+        b = a + len(data)
+        if a < lo:
+            st["head"].write(zh.compress(data[:min(b, lo) - a]))
+        if b > hi:
+            st["tail"].write(zt.compress(data[max(a, hi) - a:]))
+        st["pos"] = b
+
+    def take(data):
+        raw.write(data)
+        if st["layout"] is None:
+            st["pre"] += data
+            if len(st["pre"]) < 1024 * 1024:
+                return
+            start(st["pre"])
+            data, st["pre"] = bytes(st["pre"]), bytearray()
+        feed(data)
+
     dec = lzma.LZMADecompressor(format=lzma.FORMAT_XZ)
     last_report = 0
     try:
-        # The asset API URL redirects to a short-lived download URL.
         with open_asset(asset["url"]) as r:
             while True:
                 chunk = r.read(CHUNK)
                 if not chunk:
                     break
-                # Bound the decompressor's output so a part never grows far past PART.
+                # Bound the decompressor's output so buffers never grow far past PART.
                 data = dec.decompress(chunk, max_length=PART)
                 while True:
-                    if layout is None and len(head) < 1024 * 1024:
-                        head += data[:1024 * 1024 - len(head)]
-                        if len(head) >= 1024 * 1024:
-                            layout = parse_gpt(bytes(head))
-                    buf += data
-                    total += len(data)
-                    while len(buf) >= PART:
-                        n = len(parts) + 1
-                        e = s3.upload_part(Bucket=c.BUCKET, Key=key, UploadId=mp["UploadId"],
-                                           PartNumber=n, Body=bytes(buf[:PART]))
-                        parts.append({"PartNumber": n, "ETag": e["ETag"]})
-                        del buf[:PART]
+                    take(data)
                     if dec.eof or dec.needs_input:
                         break
                     data = dec.decompress(b"", max_length=PART)
-                if total - last_report > 256 * 1024 * 1024:
-                    last_report = total
-                    set_state(tag, copied=total)
+                if raw.size - last_report > 256 * 1024 * 1024:
+                    last_report = raw.size
+                    set_state(tag, copied=raw.size)
         if not dec.eof:
             raise ValueError("the .xz download ended early")
-        if buf or not parts:
-            n = len(parts) + 1
-            e = s3.upload_part(Bucket=c.BUCKET, Key=key, UploadId=mp["UploadId"], PartNumber=n, Body=bytes(buf))
-            parts.append({"PartNumber": n, "ETag": e["ETag"]})
-        s3.complete_multipart_upload(Bucket=c.BUCKET, Key=key, UploadId=mp["UploadId"],
-                                     MultipartUpload={"Parts": parts})
+        if st["layout"] is None:
+            start(st["pre"])
+            feed(bytes(st["pre"]))
+        st["head"].write(zh.flush())
+        st["tail"].write(zt.flush())
+        total = raw.close()
+        head_size = st["head"].close()
+        tail_size = st["tail"].close()
     except Exception:
-        s3.abort_multipart_upload(Bucket=c.BUCKET, Key=key, UploadId=mp["UploadId"])
+        for u in uploads:
+            u.abort()
         raise
 
-    if layout is None:
-        layout = parse_gpt(bytes(head))
-    ss, gpt = layout
-    cfg = next((p for p in gpt if p["label"] == "SIGNCFG"), None) \
-        or next((p for p in gpt if p["type"] == CONFIG_TYPE), None)
-    if not cfg:
-        raise ValueError("no SIGNCFG partition in the image")
-    return set_state(tag, state="ready", key=key, filename=name, size=total, sector_size=ss,
-                     config_offset=cfg["offset"], config_size=cfg["size"], partitions=gpt, copied=total)
+    ss, gpt = st["layout"]
+    cfg = st["cfg"]
+    return set_state(tag, state="ready", key=base, filename=name, size=total, sector_size=ss,
+                     config_offset=cfg["offset"], config_size=cfg["size"], partitions=gpt, copied=total,
+                     gz_head_key=f"{base}.head.gz", gz_head_size=head_size,
+                     gz_tail_key=f"{base}.tail.gz", gz_tail_size=tail_size)
