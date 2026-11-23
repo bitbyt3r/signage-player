@@ -10,6 +10,8 @@ build step:
 |---|---|
 | `index.html` | layout, the status screen and update bar styles |
 | `player.mjs` | polling, layers, transitions |
+| `display.mjs` | the display layout: an ordinary screen, or the arch canvas sliced to the LED controller |
+| `layouts.mjs` | the geometry table for sliced layouts (also read by `scripts/ograf-preview.html`) |
 | `eligibility.mjs` | when an item may play (pure; unit tests in `tests/player/`) |
 | `status.mjs` | status files, dashboard line and update bar (shared with `/host/`) |
 
@@ -24,6 +26,7 @@ kiosk's Firefox profile under `/var/lib/signage/home`.
 | `/packages/<id>/<version>/…` | `/var/lib/signage/packages/` (the dashboard's packages), else the image's `/usr/share/signage/packages/` |
 | `/status/status.json` | the kiosk's device status (hostname, version, addresses, clock, config, display) |
 | `/status/agent.json`, `/status/update.json` | the dashboard agent's connection and OS update progress (`/run/signage/`) |
+| `/status/display.json` | `signage-config`'s display settings, including `layout` (`/run/signage/display.json`) |
 | `/player/`, `/host/` | `/usr/share/signage/` |
 
 Nothing else under `/var/lib/signage` is served (`config.toml` has the
@@ -118,6 +121,92 @@ The out-animation finishes before the next graphic loads. That is the
 is skipped for 60 s and the error is logged to the console. The layer
 moves on, and other layers aren't affected. A failing `stopAction` or
 `dispose` is logged, and the graphic is removed anyway.
+
+## Display layouts
+
+`[display] layout` in `config.toml` (or the dashboard's device settings)
+picks how the page maps onto the video output. `signage-config` writes it
+to `/run/signage/display.json`, and the kiosk links that into `/status/`.
+
+- `screen` (the default, or empty): an ordinary monitor. The canvas is
+  the viewport.
+- `arch`: the entrance arch's LED wall. The header and both legs are one
+  picture, a 2760x2565 canvas, which the player cuts up into the
+  3840x2160 map the LED controller takes. `signage-config` sets
+  `display.mode = "3840x2160"` unless a mode is given.
+
+The player reads `display.json` when it starts and on every poll (2 s). If
+the layout changes, it reloads the page. `?layout=screen` or
+`?layout=arch` overrides the file, for testing on a desktop. `?debug=1`
+outlines and labels the regions on the canvas.
+
+### The arch
+
+Every cabinet is 240x135 px, so the pixel pitch is the same everywhere and
+the legs sit directly under the header's outer ends. On the canvas:
+
+| Region | Canvas `[x, y, w, h]` | Output position |
+|---|---|---|
+| header (11.5 x 7 cabinets) | `[0, 0, 2760, 945]` | `(0, 0)` |
+| left leg (1.5 x 12) | `[0, 945, 360, 1620]` | `(2760, 0)` |
+| right leg (2 x 12) | `[2280, 945, 480, 1620]` | `(3120, 0)` |
+| door opening (not shown) | `[360, 945, 1920, 1620]` | — |
+
+Both strips are upright, and the rest of the output is black. The numbers
+live in one table, `player/layouts.mjs`.
+
+How it's drawn:
+
+- `#layers`, the canvas every layer renders into, is fixed at 2760x2565 at
+  the top left of the output. The header's output position is its canvas
+  position, so it needs no copy.
+- Each leg is a div at its output position with
+  `background: -moz-element(#layers)`, offset to the leg's rect. Firefox
+  paints the canvas into it as an image, including the part below the
+  2160 px viewport, and repaints it as the canvas animates. Graphics run
+  and lay out once.
+- A black mask covers the canvas outside the header on the output.
+- The status screen and the update bar go in the header, sized as if it
+  were a 16:9 screen of the header's height.
+
+Checked in Firefox ESR 153 headless at 3840x2160 with a test pattern of the
+cabinet grid: the strips show rows 7-18 of the legs, down to the canvas
+bottom, and follow an animation. `docs/arch/arch-debug.png` is that test
+with `?debug=1`, `docs/arch/arch-status.png` the status screen and update
+bar.
+
+### What graphics get
+
+`load()` gets `renderCharacteristics.resolution` = the canvas size
+(2760x2565 on the arch). Before any graphic loads, the player sets
+`globalThis.signageDisplay`:
+
+```js
+{
+  layout: "arch",            // or "screen"
+  width: 2760, height: 2565, // the canvas
+  regions: {                 // [x, y, w, h] on the canvas
+    header: [0, 0, 2760, 945],
+    left: [0, 945, 360, 1620],
+    right: [2280, 945, 480, 1620],
+  },
+  visible: [[0, 0, 2760, 945], [0, 945, 360, 1620], [2280, 945, 480, 1620]],
+}
+```
+
+On a screen it's `{layout: "screen", width, height, regions: {screen:
+[0, 0, w, h]}, visible: [[0, 0, w, h]]}` with the viewport size.
+
+`#layers` also has `data-layout="arch"` and the custom properties
+`--canvas-w`, `--canvas-h` and `--<region>-w` / `--<region>-h` (for example
+`--header-h`, `--left-w`, `--right-w`). They're inherited into a graphic's
+shadow DOM, so its CSS can use them. Each layer's container fills the
+canvas, so `vw` and `vh` in a graphic still mean the 3840x2160 viewport.
+Use `%` of the host, or the properties above, instead.
+
+To design for the arch, open `scripts/ograf-preview.html?layout=arch`. It
+renders the graphic on the canvas with the door opening hatched, and can
+show the sliced output (in Firefox).
 
 ## Status screen
 

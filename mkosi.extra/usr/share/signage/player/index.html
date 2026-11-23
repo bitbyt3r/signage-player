@@ -10,33 +10,57 @@
 
   Parameters: demo=1     play the demo lower third when no program is assigned
               status=0   never show the status screen (black instead)
+              layout=    screen or arch: overrides [display] layout (testing)
+              debug=1    outline the layout's regions
 -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; cursor: none; background: #000; }
   body { font-family: "DejaVu Sans", sans-serif; color: #e8eef2; }
-  #layers > div { position: absolute; inset: 0; background: transparent; overflow: hidden; }
-  #layers > div > * { position: absolute; inset: 0; }
+  #layers { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; z-index: 0; }
+  #layers > .layer { position: absolute; inset: 0; background: transparent; overflow: hidden; }
+  #layers > .layer > * { position: absolute; inset: 0; }
 
-  #status { position: absolute; inset: 0; z-index: 1000000; display: grid; place-content: center;
-            background: #101418; font-size: 2vw; line-height: 1.35; }
+  /* Sliced layouts (display.mjs): the canvas is fixed-size at the top left,
+     each slice paints a part of it at its output position. */
+  #output { position: absolute; left: 0; top: 0; z-index: 1; }
+  #output > div { position: absolute; }
+  #output .mask { background: #000; z-index: 1; }
+  #output .slice { background: -moz-element(#layers) no-repeat; z-index: 2; }
+
+  /* ?debug=1: region outlines, drawn on the canvas (so slices show them too). */
+  #debug { position: absolute; inset: 0; z-index: 2147483000; pointer-events: none; }
+  #debug .region { position: absolute; box-sizing: border-box; border: 6px solid #ff00ff;
+                   color: #ff00ff; font: bold 40px "DejaVu Sans Mono", monospace; padding: 12px; }
+  #debug .region.hidden { border-style: dashed; border-color: #888; color: #888;
+                          background: repeating-linear-gradient(45deg, #8882 0 20px, transparent 20px 40px); }
+
+  /* The status screen and update bar live in #frame: the whole screen, or
+     on a sliced layout the region a person sees (the arch header). Sizes
+     are in --u, 1vw on an ordinary screen. */
+  #frame { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none;
+           --u: 1vw; z-index: 1000000; }
+  #status { position: absolute; inset: 0; display: grid; place-content: center;
+            background: #101418; font-size: calc(2 * var(--u)); line-height: 1.35; }
   #status[hidden] { display: none; }
-  #status h1 { font-size: 4vw; margin: 0 0 .4em; font-weight: bold; }
+  #status h1 { font-size: calc(4 * var(--u)); margin: 0 0 .4em; font-weight: bold; }
   #status dl { display: grid; grid-template-columns: auto 1fr; gap: .45em 1.2em; margin: 0; }
   #status dt { color: #8aa0b0; }
   #status dd { margin: 0; }
-  #status code { font-size: 1.6vw; }
-  #status .note { color: #8aa0b0; font-size: 1.6vw; margin-top: 1em; }
+  #status code { font-size: calc(1.6 * var(--u)); }
+  #status .note { color: #8aa0b0; font-size: calc(1.6 * var(--u)); margin-top: 1em; }
   .ok { color: #8be08b; } .warn { color: #ffc266; } .dim { color: #8a949c; } .err { color: #ff8a80; }
 
-  #update { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2000000; height: 3.2vw;
-            background: rgba(0, 0, 0, 0.7); font-size: 1.5vw; }
+  #update { position: absolute; left: 0; right: 0; bottom: 0; z-index: 1; height: calc(3.2 * var(--u));
+            background: rgba(0, 0, 0, 0.7); font-size: calc(1.5 * var(--u)); }
   #update[hidden] { display: none; }
   #update .fill { position: absolute; inset: 0 auto 0 0; background: #2f7fd0; transition: width 1s linear; }
   #update.failed .fill { background: #b03a2e; }
-  #update .label { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 1.5vw;
-                   text-shadow: 0 0 0.3vw #000; }
+  #update .label { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 calc(1.5 * var(--u));
+                   text-shadow: 0 0 calc(0.3 * var(--u)) #000; }
 </style>
 <div id="layers"></div>
-<div id="status" hidden></div>
-<div id="update" hidden><div class="fill"></div><div class="label"></div></div>
+<div id="frame">
+  <div id="status" hidden></div>
+  <div id="update" hidden><div class="fill"></div><div class="label"></div></div>
+</div>
 <script type="module" src="player.mjs"></script>

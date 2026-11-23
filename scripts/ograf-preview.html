@@ -9,6 +9,11 @@
   From the repo root:  python3 -m http.server 8080
   then open           http://localhost:8080/scripts/ograf-preview.html
   ?graphic=/packages/<id>/<id>.ograf.json picks another package.
+  ?layout=arch renders on the entrance arch's 2760x2565 canvas (one
+  picture across the header and both legs, the door opening hatched), and
+  can show the 3840x2160 output the player sends the LED controller
+  (Firefox only: it uses -moz-element, as the player does). The geometry is
+  mkosi.extra/usr/share/signage/player/layouts.mjs.
 -->
 <style>
   :root { color-scheme: dark; --bg: #15181c; --panel: #1e2328; --line: #343b43; --fg: #e8edf1; --muted: #9aa6b1; --acc: #E4BC60; }
@@ -29,7 +34,14 @@
   main { display: grid; place-items: center; padding: 16px; min-width: 0; min-height: 0; overflow: hidden; }
   #box { position: relative; }
   #stage { position: absolute; left: 0; top: 0; background: #000; box-shadow: 0 0 0 1px var(--line); overflow: hidden; transform-origin: 0 0; }
-  #layer { position: absolute; inset: 0; }
+  #layer { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+  /* ?layout=arch */
+  .hidden-area { position: absolute; z-index: 10; pointer-events: none; display: grid; place-content: center;
+                 background: repeating-linear-gradient(45deg, #000c 0 24px, #3338 24px 48px);
+                 color: #aaa; font: bold 48px system-ui, sans-serif; }
+  .mask { position: absolute; z-index: 10; background: #000; }
+  .slice { position: absolute; z-index: 11; background: -moz-element(#layer) no-repeat; }
+  .outline { position: absolute; z-index: 12; box-sizing: border-box; border: 4px dashed #ff00ff80; pointer-events: none; }
 </style>
 <aside>
   <h1>OGraf preview</h1>
@@ -53,12 +65,15 @@
 </aside>
 <main><div id="box"><div id="stage"><div id="layer"></div></div></div></main>
 <script type="module">
+import { LAYOUTS } from "../mkosi.extra/usr/share/signage/player/layouts.mjs";
 const q = new URLSearchParams(location.search);
+const LAYOUT = LAYOUTS[q.get("layout")] ? q.get("layout") : null;
+const L = LAYOUT && LAYOUTS[LAYOUT];
 const manifestUrl = new URL(q.get("graphic") || "/packages/magfest-schedule/magfest-schedule.ograf.json", location.href);
 const $ = (id) => document.getElementById(id);
 const log = (...a) => { $("log").textContent = `${new Date().toLocaleTimeString()} ${a.join(" ")}\n` + $("log").textContent; };
 const lines = (id) => $(id).value.split("\n").map((s) => s.trim()).filter(Boolean);
-const KEY = "ograf-preview:" + manifestUrl.pathname;
+const KEY = "ograf-preview:" + manifestUrl.pathname + (LAYOUT ? `:${LAYOUT}` : "");
 
 let manifest, cls, el, n = 0;
 
@@ -71,9 +86,45 @@ function data() {
 function save() { try { localStorage.setItem(KEY, JSON.stringify({ ...Object.fromEntries(["rooms", "tracks", "excludeTracks", "abbreviate", "theme", "screen", "extra"].map((k) => [k, $(k).value])) })); } catch {} }
 function restore() { try { const s = JSON.parse(localStorage.getItem(KEY) || "{}"); for (const [k, v] of Object.entries(s)) if ($(k)) $(k).value = v; } catch {} }
 
+// ?layout=arch: the graphic renders on the layout's canvas. "canvas" shows
+// it with the parts no LED shows hatched; "output" shows what the player
+// sends the controller.
+function archStage(view) {
+  const st = $("stage"), layer = $("layer");
+  st.querySelectorAll(".hidden-area, .mask, .slice, .outline").forEach((e) => e.remove());
+  const [cw, ch] = L.canvas;
+  Object.assign(layer.style, { width: `${cw}px`, height: `${ch}px` });
+  const box = ([x, y, w, h], cls) => {
+    const e = document.createElement("div");
+    e.className = cls;
+    Object.assign(e.style, { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` });
+    st.append(e);
+    return e;
+  };
+  if (view === "canvas") {
+    for (const [name, r] of Object.entries(L.hidden || {})) box(r, "hidden-area").textContent = `${name}: not shown`;
+    for (const r of Object.values(L.regions)) box(r.rect, "outline");
+    return [cw, ch];
+  }
+  const [ow, oh] = L.output;
+  for (const r of Object.values(L.regions)) {
+    const [x, y, w, h] = r.rect, [ox, oy] = r.out;
+    if (x === ox && y === oy) {
+      // Shown in place: black out the rest of the canvas below and beside it.
+      for (const m of [[0, y + h, cw, oh - y - h], [x + w, y, cw - x - w, h]]) if (m[2] > 0 && m[3] > 0) box(m, "mask");
+      continue;
+    }
+    const s = box([ox, oy, w, h], "slice");
+    s.style.backgroundSize = `${cw}px ${ch}px`;
+    s.style.backgroundPosition = `${-x}px ${-y}px`;
+  }
+  if (!CSS.supports("background-image", "-moz-element(#layer)")) log("The output view needs Firefox (-moz-element); the leg strips stay empty here.");
+  return [ow, oh];
+}
+
 function sizeStage() {
   const st = $("stage"), main = $("box").parentElement.getBoundingClientRect();
-  let [w, h] = $("screen").value === "fit" ? [main.width - 32, main.height - 32] : $("screen").value.split("x").map(Number);
+  let [w, h] = L ? archStage($("screen").value) : $("screen").value === "fit" ? [main.width - 32, main.height - 32] : $("screen").value.split("x").map(Number);
   const scale = Math.min(1, (main.width - 32) / w, (main.height - 32) / h);
   // Render at the real resolution, scaled down to fit the window.
   Object.assign(st.style, { width: `${w}px`, height: `${h}px`, transform: `scale(${scale})` });
@@ -90,7 +141,7 @@ async function mount() {
   $("layer").append(el);
   const t = performance.now();
   const r = await el.load({ data: { ...defaults, ...data() }, renderType: "realtime",
-    renderCharacteristics: { resolution: { width: $("stage").offsetWidth, height: $("stage").offsetHeight } } });
+    renderCharacteristics: { resolution: { width: $("layer").offsetWidth, height: $("layer").offsetHeight } } });
   log(`load ${r?.statusCode} in ${Math.round(performance.now() - t)} ms`);
   await play();
 }
@@ -110,6 +161,14 @@ async function fillNames() {
 }
 
 restore();
+if (L) {
+  // What the player gives graphics on this layout (display.mjs).
+  const regions = Object.fromEntries(Object.entries(L.regions).map(([k, r]) => [k, [...r.rect]]));
+  globalThis.signageDisplay = Object.freeze({ layout: LAYOUT, width: L.canvas[0], height: L.canvas[1], regions, visible: Object.values(regions) });
+  $("screen").replaceChildren(...[["canvas", `${LAYOUT} canvas ${L.canvas.join("×")}`], ["output", `${LAYOUT} output ${L.output.join("×")} (Firefox)`]]
+    .map(([v, t]) => Object.assign(document.createElement("option"), { value: v, textContent: t })));
+  if (!["canvas", "output"].includes($("screen").value)) $("screen").value = "canvas";
+}
 manifest = await (await fetch(manifestUrl, { cache: "no-store" })).json();
 document.title = `${manifest.name} preview`;
 cls = (await import(new URL(manifest.main, manifestUrl).href + `?t=${Date.now()}`)).default;

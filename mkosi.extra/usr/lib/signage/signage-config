@@ -27,6 +27,10 @@ NM_DIR = Path("/etc/NetworkManager/system-connections")
 CHRONY_SOURCES = Path("/etc/chrony/sources.d/signage.sources")
 
 ROTATIONS = {0, 90, 180, 270}
+# The player's display layouts (player/layouts.mjs); "" means "screen".
+LAYOUTS = {"", "screen", "arch"}
+# The video mode each sliced layout's LED controller expects.
+LAYOUT_MODES = {"arch": "3840x2160"}
 MODE_RE = re.compile(r"^\d+x\d+(@\d+(\.\d+)?)?$")
 NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
@@ -85,6 +89,7 @@ def validate(cfg):
     typed("display", "rotation", int, lambda v: v in ROTATIONS, "must be 0, 90, 180 or 270")
     typed("display", "output", str)
     typed("display", "scale", (int, float), lambda v: 0.25 <= v <= 4, "must be 0.25 to 4")
+    typed("display", "layout", str, lambda v: v in LAYOUTS, 'must be "screen" or "arch"')
     typed("player", "demo", bool)
     typed("install", "target", str, lambda v: v == "" or v.startswith("/dev/"), "must be a /dev path")
     typed("install", "countdown", int, lambda v: 0 <= v <= 600, "must be 0 to 600")
@@ -248,8 +253,11 @@ def apply_ntp(cfg):
 
 def apply_display(cfg):
     d = cfg.get("display", {})
+    layout = d.get("layout") or "screen"
     out = {
-        "mode": d.get("mode", ""),
+        "layout": layout,
+        # A sliced layout needs the controller's mode unless one is set.
+        "mode": d.get("mode") or LAYOUT_MODES.get(layout, ""),
         "custom": bool(d.get("custom", False)),
         "rotation": int(d.get("rotation", 0)),
         "output": d.get("output", ""),

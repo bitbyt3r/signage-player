@@ -37,6 +37,12 @@ rotation = 0
 # Connector to configure, e.g. "HDMI-A-1" or "DP-1". Default: every output.
 # output = ""
 # scale = 1.0
+# What the screen is. "screen" (the default) is an ordinary monitor.
+# "arch" is the entrance arch's LED wall: the player draws the header and
+# both legs as one 2760x2565 picture and cuts it up into the 3840x2160
+# map the LED controller expects (header at the top left, then the left
+# and right leg strips). With "arch", mode defaults to "3840x2160".
+# layout = "screen"
 
 [player]
 # The player plays whatever program the dashboard assigns. With no program

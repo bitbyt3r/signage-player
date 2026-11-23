@@ -110,9 +110,11 @@ HTML
 
 apply_display
 # The agent's update progress and connection state, for the host page
-# (signage-web serves this directory as /status/).
+# and the player (signage-web serves this directory as /status/).
 ln -sf /run/signage/update.json "$STATUS_DIR/update.json"
 ln -sf /run/signage/agent.json "$STATUS_DIR/agent.json"
+# display.json's layout (screen or arch) is read by the player page.
+ln -sf "$DISPLAY_JSON" "$STATUS_DIR/display.json"
 write_status
 ( while sleep 5; do write_status; done ) &
 

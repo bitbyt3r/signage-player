@@ -3,6 +3,7 @@
 // See docs/player.md for the behaviour and the content.json contract.
 import { isEligible, problems } from "./eligibility.mjs";
 import { esc, getJson, dashboardState, startUpdateBar } from "./status.mjs";
+import { setupDisplay, wantedLayout } from "./display.mjs";
 
 const params = new URLSearchParams(location.search);
 const DEMO = params.get("demo") === "1";
@@ -88,6 +89,7 @@ async function createGraphic(item) {
 class LayerRunner {
     constructor(def) {
         this.container = document.createElement("div");
+        this.container.className = "layer";
         this.current = null;   // {item, el, defaults, started}
         this.index = -1;       // position of the current item in this.items
         this.busy = false;     // a transition is running
@@ -222,7 +224,7 @@ class LayerRunner {
             const res = await withTimeout(g.el.load({
                 data: { ...g.defaults, ...(item.data || {}) },
                 renderType: "realtime",
-                renderCharacteristics: { resolution: { width: innerWidth, height: innerHeight } },
+                renderCharacteristics: { resolution: { width: DISPLAY.width, height: DISPLAY.height } },
             }), T_LOAD, "load");
             checkResult(res, "load");
             const cur = { item, el: g.el, defaults: g.defaults, started: Date.now() };
@@ -253,6 +255,11 @@ class LayerRunner {
 // ---------------------------------------------------------------- content
 
 const layersEl = document.getElementById("layers");
+// The display layout (display.mjs): an ordinary screen, or the arch's one
+// logical canvas sliced to the LED controller. Fixed for the page's life;
+// a change in display.json reloads the page.
+const DISPLAY = setupDisplay((await wantedLayout()) || "screen", layersEl, document.getElementById("frame"));
+log(`layout ${DISPLAY.layout}, canvas ${DISPLAY.width}x${DISPLAY.height}`);
 const runners = new Map(); // layer key -> LayerRunner
 let content = null, rev = null, contentError = "";
 
@@ -273,6 +280,12 @@ function reconcile(next) {
 }
 
 async function poll() {
+    const layout = await wantedLayout();
+    if (layout && layout !== DISPLAY.layout) {
+        log(`layout changed to ${layout}; reloading`);
+        location.reload();
+        return;
+    }
     let next = null;
     try {
         const r = await fetch("/content.json", { cache: "no-store" });
