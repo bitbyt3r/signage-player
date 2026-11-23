@@ -425,8 +425,15 @@ class Stream:
             "! video/x-h264,stream-format=byte-stream ! queue max-size-buffers=0 max-size-time=0 max-size-bytes=0 "
             "! h264parse ! video/x-h264,stream-format=byte-stream,alignment=au "
             "! rtph264pay config-interval=-1 aggregate-mode=zero-latency mtu=1200 pt=96 "
+            # Closed until the peer connection is up: video pushed into
+            # webrtcbin while it negotiates could stall the stream for good.
+            "! valve name=gate drop=true drop-mode=forward-sticky-events "
             "! application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000 "
-            "! webrtcbin name=webrtc bundle-policy=max-bundle latency=0")
+            # No BUNDLE: GStreamer 1.24's webrtcbin sometimes aborts on
+            # an assertion (_connect_rtpfunnel) when applying a bundled
+            # answer. Unbundled, video and the input channel each get their
+            # own ICE transport, which browsers accept.
+            "! webrtcbin name=webrtc bundle-policy=none latency=0")
         self.webrtc = self.pipe.get_by_name("webrtc")
         ice_config(self.webrtc, self.cfg.get("ice_servers"))
         self.webrtc.connect("on-negotiation-needed", self.on_negotiation_needed)
@@ -514,6 +521,7 @@ class Stream:
         state = webrtc.get_property("connection-state")
         log(f"connection {state.value_nick}")
         if state == GstWebRTC.WebRTCPeerConnectionState.CONNECTED:
+            self.pipe.get_by_name("gate").set_property("drop", False)
             emit({"t": "connected"})
         elif state in (GstWebRTC.WebRTCPeerConnectionState.FAILED, GstWebRTC.WebRTCPeerConnectionState.CLOSED):
             GLib.idle_add(self.stop, f"connection {state.value_nick}")
