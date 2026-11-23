@@ -41,7 +41,7 @@ never in the repo.
 | Key | Used for | Where the private part lives |
 |---|---|---|
 | Production MOK, CN "MAGFest Signage MOK 2026", RSA 2048, to 2036 | signs systemd-boot and the UKI | GitHub `release` environment: `MOK_KEY`, `MOK_CERT` |
-| Backup MOK, CN "MAGFest Signage MOK backup" | nothing yet; enrolled on every player so we can rotate without touching machines | offline only |
+| Backup MOK, CN "MAGFest Signage MOK backup" | nothing yet; enrolled by hand on players so we can rotate without touching them | offline only |
 | Release GPG key, "MAGFest Signage releases", ed25519 | signs `SHA256SUMS` for sysupdate | GitHub `release` environment: `RELEASE_GPG_KEY` |
 
 Public parts in the repo:
@@ -78,24 +78,22 @@ Per machine, once. On the M715q the BIOS is F1 at power-on.
 
    The stick now boots into the installer.
 3. **Installer.** It writes `bios-<serial>.txt` to the stick's SIGNCFG
-   partition (see below), installs, and runs `mokutil --import` for any of
-   our certificates the machine doesn't trust yet (normally the backup, plus
-   the production one if Secure Boot was off). The password is
-   `install.mok_password` in `config.toml` (default `signage`). It then
-   reboots after 30 s instead of 10 and says so on screen. It also sets
-   shim's `MokTimeout` to 60 s (`mokutil --timeout`) so the MokManager
-   prompts on that machine wait a minute instead of 10 s.
-4. **First boot from the disk.** MokManager shows again because of that
-   request:
-   - "Press any key to perform MOK management" → press a key within 60 s
-     (the installer sets `MokTimeout` to 60; shim's default is 10)
-   - **Enroll MOK** → (View key 0/1 to check) **Continue** → **Yes** → type
-     the password → **Reboot**
-
-   If nobody presses a key, shim drops the request and boots on. That's
-   harmless while the production key is already enrolled (step 2); only the
-   backup key is missing, which matters at the next rotation (run
-   `mokutil --import /usr/share/signage/mok/*.cer` again then).
+   partition (see below), installs, and sets shim's `MokTimeout` to 60 s
+   (`mokutil --timeout`) so any later MokManager prompt on that machine
+   waits a minute instead of 10 s. It queues keys with `mokutil --import`
+   only when the machine trusts none of ours, which with Secure Boot on
+   can't happen (the stick wouldn't have booted). So normally it queues
+   nothing and says `Secure Boot is on and our signing key is enrolled: nothing to
+   enroll.`, or `Secure Boot is off: no keys to enroll.` Enrolled MOKs live
+   in the firmware and survive a re-image, so re-imaging a player never
+   brings up MokManager.
+4. **Backup key (optional, when convenient).** Not queued by the installer,
+   because every queued key means a MokManager confirmation at the next
+   boot. To add it, on the player run
+   `mokutil --import /usr/share/signage/mok/magfest-signage-mok-backup.cer`
+   (password of your choice), reboot with someone at the screen, and in
+   MokManager pick **Enroll MOK** → **Continue** → **Yes** → password →
+   **Reboot**. It only matters at the next key rotation.
 
 If Secure Boot was off during install and is turned on later without the
 key enrolled, the player shows the step-2 screens; the installed ESP has the
@@ -153,17 +151,21 @@ policy or setup. As a last resort, turn Secure Boot off, install, and turn
 it back on afterwards; the installed system then shows shim's screen and the
 same enrollment works from the disk's ESP.
 
-**The MokManager prompt never shows after install.** The queued request
-is only offered once; if nobody pressed a key it's gone. The production key
-is still enrolled from step 2, so the player boots; to enroll the backup key,
-run `mokutil --import /usr/share/signage/mok/*.cer` on the player and reboot
-with someone at the screen.
+**MokManager shows after a re-image.** Images from before 0.1.2 queued our
+certificates on every install, even ones the firmware already had. Press a
+key and pick **Continue boot** (or let it time out): nothing is lost, the
+enrolled keys stay. Current installers queue nothing when the signing key
+is already enrolled.
+
+**A queued request was skipped.** shim offers a queued request once; if
+nobody pressed a key it's gone and the player boots on the keys it already
+has. Run the `mokutil --import` again and reboot with someone at the screen.
 
 ## Rotating to the backup MOK
 
-The backup certificate is enrolled on every player at install, so a rotation
-needs no visit as long as the updated UKI and systemd-boot are signed with a
-key the machine already trusts.
+Once the backup certificate is enrolled on a player (step 4 above), a
+rotation needs no visit there as long as the updated UKI and systemd-boot
+are signed with a key the machine already trusts.
 
 1. Move `mok-backup.key`/`.crt` into the `MOK_KEY`/`MOK_CERT` secrets. Release.
    sysupdate installs the new UKI. **systemd-boot isn't updated by sysupdate

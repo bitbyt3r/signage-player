@@ -16,10 +16,41 @@ STAGE=/run/signage-install/stage
 DEFS=/run/signage-install/repart.d
 
 say() { printf '%s\n' "$*"; }
-TARGET= WRITING=
+TARGET= WRITING= INSTALLED=
+# Everything below the install runs from the stick's /usr, and someone may
+# pull the stick at the end, after which no external command can run. So the
+# end of the install, die() and the reboot use bash builtins only.
+pause() { # pause SECONDS (0 = forever); a key press ends a timed pause early
+    local t=$1 fd
+    # A pipe we hold both ends of: read on it blocks until the timeout, with
+    # no external command (process substitution forks bash, it doesn't exec).
+    exec {fd}<> <(:)
+    if ((t == 0)); then
+        while :; do read -r -t 3600 -u "$fd" _ 2>/dev/null; done
+    fi
+    read -r -s -n1 -t "$t" _ 2>/dev/null </dev/tty1 || read -r -t "$t" -u "$fd" _ 2>/dev/null || true
+    exec {fd}<&-
+}
+reboot_now() {
+    sync 2>/dev/null || true
+    systemctl reboot 2>/dev/null && pause 60
+    # systemctl is gone (stick pulled) or didn't work: sysrq, builtins only.
+    # s = sync, u = remount read-only, b = reboot.
+    echo 1 >/proc/sys/kernel/sysrq
+    echo s >/proc/sysrq-trigger; pause 2
+    echo u >/proc/sysrq-trigger; pause 2
+    echo b >/proc/sysrq-trigger
+    pause 0
+}
 die() {
     trap - ERR EXIT
     say ""
+    if [[ -n $INSTALLED ]]; then
+        # The disk is complete and bootable: never touch it now.
+        say "The install on $TARGET finished, but then: $*"
+        say "Rebooting into the installed system..."
+        reboot_now
+    fi
     say "INSTALL FAILED: $*"
     # Never leave a half-written disk the firmware would boot: drop its
     # partition table (primary and backup GPT, protective MBR).
@@ -27,14 +58,19 @@ die() {
         wipefs -q -a -f "$TARGET" 2>/dev/null && say "The partial install on $TARGET was erased; it won't boot."
     fi
     say "Power off, fix the problem, and boot the stick again."
-    sleep infinity
+    pause 0
 }
 trap 'die "unexpected error on line $LINENO"' ERR
 # Errors inside functions don't run the ERR trap (no set -E, which would
 # also fire inside $(...)); set -e still exits, and this catches that.
 trap 'rc=$?; [[ $rc -eq 0 ]] || die "the installer stopped unexpectedly (exit code $rc)"' EXIT
 
+# Boot status lines ([  OK  ] Started ...) would interleave with ours on
+# tty1; SIGRTMIN+21 tells systemd to stop printing them.
+kill -s RTMIN+21 1 2>/dev/null || true
 clear || true
+# TTYReset= put the default 8x16 font back; use the banner's Terminus.
+/usr/lib/signage/signage-banner --font
 say "=== Signage player installer ($(. /usr/lib/os-release; echo "$IMAGE_VERSION")) ==="
 say ""
 
@@ -279,24 +315,40 @@ say "Copying the boot partition..."
 dd if="$SRC_ESP" of="$TGT_ESP" bs=4M conv=fsync status=none
 cmp -n "$(blockdev --getsize64 "$SRC_ESP")" "$SRC_ESP" "$TGT_ESP" >/dev/null || die "the boot partition copy doesn't match the stick"
 
-# Secure Boot: queue our certificates for MOK enrollment unless shim already
-# trusts them (for example after "Enroll key from disk" in MokManager, which
-# is how a machine with Secure Boot already on gets to boot this stick).
-# MokManager asks to confirm on the next boot, using install.mok_password.
-mok_enroll() {
-    command -v mokutil >/dev/null && [[ -d /sys/firmware/efi ]] || return 0
-    local c pending=()
+# Secure Boot. Enrolled MOKs live in firmware NVRAM and survive a reinstall,
+# so a re-image must not queue anything: every queued key means a MokManager
+# prompt at the next boot. With Secure Boot on, the key this build is signed
+# with is necessarily trusted already (the stick wouldn't have booted
+# otherwise, e.g. after "Enroll key from disk"), so normally nothing is
+# queued. The backup key is enrolled by hand when convenient
+# (docs/secure-boot.md). With Secure Boot off there is nothing to do either.
+MOK_QUEUED=
+# MokManager's "Press any key to perform MOK management" waits MokTimeout
+# seconds (default 10, then the request is dropped). Give whoever is at the
+# screen a minute. Not forever (-1): a player rebooting on its own with a
+# request still queued would sit at MokManager until someone presses a key.
+MOK_TIMEOUT=60
+mok_trusted() { [[ $(mokutil --test-key "$1" 2>&1 || true) == *already* ]]; }
+mok_setup() {
+    command -v mokutil >/dev/null && [[ -d /sys/firmware/efi ]] || { say "Secure Boot: not a UEFI system, nothing to enroll."; return 0; }
+    local sb c signer pending=()
+    sb=$(mokutil --sb-state 2>/dev/null || true)
+    if [[ $sb != *"SecureBoot enabled"* ]]; then
+        say "Secure Boot is off: no keys to enroll."
+        return 0
+    fi
+    mokutil --timeout "$MOK_TIMEOUT" >/dev/null 2>&1 || true
+    # Dev and pull-request builds ship the cert they were signed with.
+    signer=/usr/share/signage/mok/build-signing.cer
+    [[ -f $signer ]] || signer=/usr/share/signage/mok/magfest-signage-mok-2026.cer
+    if mok_trusted "$signer"; then
+        say "Secure Boot is on and our signing key is enrolled: nothing to enroll."
+        return 0
+    fi
+    # Not reached in practice (the stick booted), but if the signing key
+    # isn't trusted, queue all of ours at once: one MokManager prompt.
     for c in /usr/share/signage/mok/*.cer; do
-        [[ -f $c ]] || continue
-        # mokutil exits non-zero for an enrolled key, so test its message,
-        # not a pipeline (pipefail would make that look "not enrolled").
-        local msg
-        msg=$(mokutil --test-key "$c" 2>&1 || true)
-        if [[ $msg == *already* ]]; then
-            say "  $(basename "$c"): already trusted"
-        else
-            pending+=("$c")
-        fi
+        [[ -f $c ]] && ! mok_trusted "$c" && pending+=("$c")
     done
     [[ ${#pending[@]} -gt 0 ]] || return 0
     local hash=$STAGE/mok.hash
@@ -304,18 +356,9 @@ mok_enroll() {
     mokutil --hash-file "$hash" --import "${pending[@]}"
     rm -f "$hash"
     MOK_QUEUED=1
-    say "  queued for enrollment: $(printf '%s ' "${pending[@]##*/}")"
+    say "Secure Boot: queued for enrollment: $(printf '%s ' "${pending[@]##*/}")"
 }
-MOK_QUEUED=
-# MokManager's "Press any key to perform MOK management" waits MokTimeout
-# seconds (default 10, then the request is dropped). Give whoever is at the
-# screen a minute. Not forever (-1): a player rebooting on its own with a
-# request still queued would sit at MokManager until someone presses a key.
-MOK_TIMEOUT=60
-command -v mokutil >/dev/null && [[ -d /sys/firmware/efi ]] &&
-    { mokutil --timeout "$MOK_TIMEOUT" >/dev/null 2>&1 || say "  could not set the MokManager timeout"; }
-say "Secure Boot: $(mokutil --sb-state 2>/dev/null | head -n1 || echo unknown)"
-mok_enroll || say "  mokutil failed; enroll the certificate from disk in MokManager instead (docs/secure-boot.md)."
+mok_setup || say "  mokutil failed; enroll the certificate from disk in MokManager instead (docs/secure-boot.md)."
 
 say "Adding firmware boot entry..."
 while read -r num; do efibootmgr -q -b "$num" -B; done < <(efibootmgr | sed -n 's/^Boot\([0-9A-F]\{4\}\)\*\? Signage.*/\1/p')
@@ -328,16 +371,18 @@ new=$(efibootmgr | sed -n 's/^Boot\([0-9A-F]\{4\}\)\*\? Signage.*/\1/p' | head -
 [[ -n $new ]] && efibootmgr -q -n "$new"
 
 sync
-WRITING=
+# From here on the disk is complete: no failure may wipe it.
+WRITING= INSTALLED=1
 say ""
 WAIT=10; [[ -n $MOK_QUEUED ]] && WAIT=30
-say "Installed to $TARGET. Rebooting into it in $WAIT s."
-say "You can remove the USB stick at any time now."
+say "Installed to $TARGET. Rebooting into the installed system in $WAIT s"
+say "(any key reboots now). Leave the stick in: it's safe, and you can"
+say "remove it once the screen goes dark."
 if [[ -n $MOK_QUEUED ]]; then
     say ""
     say "ON THE NEXT BOOT a blue MokManager screen asks to enroll the signing key."
     say "Press a key within $MOK_TIMEOUT s, then: Enroll MOK > Continue > Yes >"
     say "password (install.mok_password in config.toml) > Reboot."
 fi
-sleep "$WAIT"
-systemctl reboot
+pause "$WAIT"
+reboot_now
