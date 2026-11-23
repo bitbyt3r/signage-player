@@ -64,23 +64,40 @@ kill -0 "$pid" 2>/dev/null || { running=""; fail "Firefox exited during the prof
 echo "Asking Firefox to write the profile (gathering every process)…"
 kill -USR2 "$pid"
 running=""
-# Firefox writes the file once every process has answered; wait until it
-# parses as complete JSON.
-f=""
+# Firefox can write the file more than once (on the arch the first
+# complete one had only the parent process, and gzipping the live file
+# while it was being rewritten gave cut-off profiles). So: wait until the
+# file has been unchanged for SETTLE_S, copy it, check the copy is complete
+# JSON, and keep waiting (up to GATHER_S) for a copy with a content
+# process. Only the checked copy is compressed.
+SETTLE_S=3
+COPY="$DIR/.profile-copy.json"
+trap '[[ -n $running ]] && kill -USR2 "$pid" 2>/dev/null; rm -rf "$DUMP" "$COPY"' EXIT
+count_tabs() {
+    python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+print(sum(1 for p in d.get("processes", []) if any(t.get("processType") == "tab" for t in p.get("threads", []))))' "$1" 2>/dev/null
+}
+good="" procs=0 last_sig=""
 for _ in $(seq $((GATHER_S * 2))); do
     sleep 0.5
     f=$(ls -1t "$DUMP"/profile_*.json 2>/dev/null | head -1)
     [[ -n $f && -s $f ]] || continue
-    python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" 2>/dev/null && break
-    f=""
+    sig=$(stat -c '%s %Y' "$f" 2>/dev/null) || continue
+    [[ $sig == "$last_sig" ]] || { last_sig=$sig; settled=0; continue; }
+    (( ++settled >= SETTLE_S * 2 )) || continue
+    settled=-999999  # check each settled version of the file once
+    cp -f "$f" "$COPY" 2>/dev/null || continue
+    [[ $(stat -c '%s %Y' "$f" 2>/dev/null) == "$sig" ]] || continue  # changed while copying
+    n=$(count_tabs "$COPY") || continue  # not complete JSON
+    good=1 procs=${n:-0}
+    (( procs >= 1 )) && break
 done
-[[ -n $f ]] || fail "NO PROFILE WRITTEN: Firefox didn't write a complete profile within $GATHER_S s of SIGUSR2"
-procs=$(python3 -c 'import json, sys
-d = json.load(open(sys.argv[1]))
-print(sum(1 for p in d.get("processes", []) if any(t.get("processType") == "tab" for t in p.get("threads", []))))' "$f" 2>/dev/null || echo 0)
+[[ -n $good ]] || fail "NO PROFILE WRITTEN: Firefox didn't write a complete profile within $GATHER_S s of SIGUSR2"
 [[ $procs -ge 1 ]] || echo "signage-profile: warning: the profile has no content (tab) process; the page's own work isn't in it" >&2
 
-gzip -c "$f" >"$OUT.tmp" && mv -f "$OUT.tmp" "$OUT" || { rm -f "$OUT.tmp"; fail "couldn't write $OUT"; }
+gzip -c "$COPY" >"$OUT.tmp" && mv -f "$OUT.tmp" "$OUT" || { rm -f "$OUT.tmp"; fail "couldn't write $OUT"; }
+rm -f "$COPY"
 chmod 0640 "$OUT"
 # Keep the newest few, never the one just written.
 ls -1t "$DIR"/profile-*.json.gz 2>/dev/null | grep -vxF "$OUT" | tail -n +"$KEEP" | xargs -r rm -f
