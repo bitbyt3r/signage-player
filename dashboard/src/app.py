@@ -33,6 +33,15 @@ ENROLL_TOKEN = os.environ.get("ENROLL_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 MIRROR_FUNCTION = os.environ.get("MIRROR_FUNCTION", "")
+# Live view: WebRTC goes straight between the browser and the device. STUN
+# finds a direct path through most NATs; a TURN relay (optional) covers the
+# rest. ICE_SERVERS is a JSON list in RTCIceServer form; TURN_KEY_ID and
+# TURN_KEY_TOKEN fetch short-lived Cloudflare TURN credentials per stream.
+ICE_SERVERS = os.environ.get("ICE_SERVERS", "").strip()
+TURN_KEY_ID = os.environ.get("TURN_KEY_ID", "").strip()
+TURN_KEY_TOKEN = os.environ.get("TURN_KEY_TOKEN", "").strip()
+DEFAULT_ICE = [{"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]}]
+STREAM_QUALITY = ("native", "1080", "720")
 
 POLL = 15          # normal check-in interval, seconds
 POLL_FAST = 3      # while someone has the device open in the dashboard
@@ -347,7 +356,7 @@ def delete_device(req, did):
 
 
 def queue_command(did, ctype, args=None, ttl=3600):
-    if ctype not in COMMANDS and ctype != "terminal":
+    if ctype not in COMMANDS and ctype not in ("terminal", "stream"):
         raise HttpError(400, f"unknown command {ctype}")
     cid = f"{c.now_ms()}-{c.new_id(3)}"
     cmd = {"id": cid, "type": ctype, "args": args or {}, "state": "pending",
@@ -408,6 +417,60 @@ def open_terminal(req, did):
     c.update(item["pk"], "META", {"watch_until": c.now() + 180})
     token = c.sign({"k": "term", "sid": sid}, 600)
     return resp(200, {"session": sid, "ws_url": WS_URL, "token": token})
+
+
+def ice_servers():
+    servers = DEFAULT_ICE
+    if ICE_SERVERS:
+        try:
+            servers = json.loads(ICE_SERVERS)
+            assert isinstance(servers, list)
+        except (ValueError, AssertionError):
+            print("ICE_SERVERS isn't a JSON list; using the default STUN servers")
+            servers = DEFAULT_ICE
+    if TURN_KEY_ID and TURN_KEY_TOKEN:
+        try:
+            req = urllib.request.Request(
+                f"https://rtc.live.cloudflare.com/v1/turn/keys/{urllib.parse.quote(TURN_KEY_ID)}/credentials/generate-ice-servers",
+                data=json.dumps({"ttl": 86400}).encode(), method="POST",
+                headers={"Authorization": f"Bearer {TURN_KEY_TOKEN}", "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                got = json.loads(r.read()).get("iceServers") or []
+            servers = list(servers) + (got if isinstance(got, list) else [got])
+        except Exception as e:
+            print(f"Cloudflare TURN credentials failed: {type(e).__name__}: {e}")
+    return servers
+
+
+@route("POST", "/api/devices/{did}/stream")
+def open_stream(req, did):
+    """Live view: like the terminal, a relay session the device joins when
+    it gets the command; the relay then only carries the WebRTC offer and
+    answer, and the video goes directly from the device to the browser."""
+    item = device_item(did)
+    if not WS_URL:
+        raise HttpError(500, "WS_URL is not configured")
+    body = req.json()
+    quality = body.get("quality") or "native"
+    if quality not in STREAM_QUALITY:
+        raise HttpError(400, f"quality must be one of {', '.join(STREAM_QUALITY)}")
+    output = str(body.get("output") or "")
+    if output and not re.match(r"^[A-Za-z0-9._-]{1,32}$", output):
+        raise HttpError(400, "bad output name")
+    bitrate = body.get("bitrate") or 0
+    if not validate.is_int(bitrate) or not (bitrate == 0 or 500_000 <= bitrate <= 50_000_000):
+        raise HttpError(400, "bitrate must be 0 (automatic) or 0.5 to 50 Mb/s")
+    servers = ice_servers()
+    sid = c.new_id(12)
+    secret = c.new_id(24)
+    c.put({"pk": f"TERM#{sid}", "sk": "META", "device_id": did, "device_secret": c.sha256(secret),
+           "created": c.now(), "ttl": c.now() + 86400})
+    queue_command(did, "stream", {"session": sid, "token": secret, "ws_url": WS_URL, "ice_servers": servers,
+                                  "quality": quality, "output": output, "bitrate": bitrate,
+                                  "control": bool(body.get("control", True))}, ttl=180)
+    c.update(item["pk"], "META", {"watch_until": c.now() + 180})
+    token = c.sign({"k": "term", "sid": sid}, 600)
+    return resp(200, {"session": sid, "ws_url": WS_URL, "token": token, "ice_servers": servers})
 
 
 @route("GET", "/api/devices/{did}/screenshots")
@@ -573,7 +636,7 @@ def checkin(req):
             cmd["state"] = "sent"
             cmd["sent"] = c.now()
             commands.append({k: cmd[k] for k in ("id", "type", "args")})
-            cmd["args"] = {k: v for k, v in cmd["args"].items() if k not in ("upload_url", "token")}
+            cmd["args"] = {k: v for k, v in cmd["args"].items() if k not in ("upload_url", "token", "ice_servers")}
         c.update(pk, x["sk"], {"data": c.dumps(cmd)})
 
     perf_ack = store_perf(pk, body.get("perf"))

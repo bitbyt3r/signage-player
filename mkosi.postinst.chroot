@@ -20,6 +20,7 @@ chmod 0644 /etc/pam.d/cage /etc/chrony/conf.d/signage.conf
 # change together.
 install -D -m 0755 "$SRCDIR/dashboard/agent/signage-agent" /usr/lib/signage/signage-agent
 install -D -m 0644 "$SRCDIR/dashboard/agent/signage-agent.service" /usr/lib/systemd/system/signage-agent.service
+install -D -m 0755 "$SRCDIR/dashboard/agent/signage-stream" /usr/lib/signage/signage-stream
 
 # Drop modules, firmware, translations and Firefox bits players never use
 # (see the script for what and why).

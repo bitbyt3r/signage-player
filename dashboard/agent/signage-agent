@@ -51,6 +51,7 @@ PROFILES = STATE / "profiles"
 PROFILE_RE = re.compile(r"^profile-[A-Za-z0-9._-]{1,100}\.json\.gz$")
 PACKAGES = STATE / "packages"
 SIGNAGE_CONFIG = os.environ.get("SIGNAGE_CONFIG_BIN", "/usr/lib/signage/signage-config")
+SIGNAGE_STREAM = os.environ.get("SIGNAGE_STREAM_BIN", "/usr/lib/signage/signage-stream")
 DRY_RUN = os.environ.get("SIGNAGE_AGENT_DRY_RUN") == "1"  # tests: don't touch the system
 
 ROLLBACK_AFTER = 300
@@ -580,6 +581,94 @@ def terminal_session(args):
     return "terminal closed"
 
 
+# ------------------------------------------------------------------ live view
+
+_stream_lock = threading.Lock()
+_stream_proc = None
+
+
+def stream_session(args):
+    """Live view: runs signage-stream (screen capture, hardware H.264 and
+    WebRTC) and carries its handshake over the terminal relay. The video
+    goes straight to the browser; this only passes a few JSON messages.
+    One stream at a time: a new one ends the previous one."""
+    global _stream_proc
+    if not Path(SIGNAGE_STREAM).exists():
+        return "this OS image has no signage-stream; update it for live view"
+    url = args["ws_url"] + "?" + urllib.parse.urlencode(
+        {"session": args["session"], "role": "device", "token": args["token"]})
+    ws = WebSocket(url)
+    cfg = {k: args.get(k) for k in ("ice_servers", "quality", "output", "control", "bitrate")}
+    env = wayland_env() or dict(os.environ)
+    with _stream_lock:
+        if _stream_proc and _stream_proc.poll() is None:
+            _stream_proc.terminate()
+        proc = _stream_proc = subprocess.Popen(
+            [SIGNAGE_STREAM, json.dumps(cfg)], env=env, text=True,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None)
+    done = threading.Event()
+    reason = ["stream ended"]
+
+    def pump_out():
+        # signage-stream's messages (offer, info, errors) go to the browser.
+        for line in proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                m = json.loads(line)
+            except ValueError:
+                continue
+            if m.get("t") in ("error", "ended"):
+                reason[0] = m.get("message") or m.get("reason") or reason[0]
+            try:
+                ws.send(line)
+            except OSError:
+                break
+        done.set()
+        ws.close()
+
+    def keepalive():
+        while not done.wait(60):
+            try:
+                ws.send('{"t":"ping"}')
+            except OSError:
+                break
+
+    threading.Thread(target=pump_out, daemon=True).start()
+    threading.Thread(target=keepalive, daemon=True).start()
+    try:
+        while not done.is_set():
+            msg = ws.recv()
+            if msg is None:
+                break
+            try:
+                m = json.loads(msg)
+            except ValueError:
+                continue
+            if m.get("t") in ("answer", "stop"):
+                proc.stdin.write(json.dumps(m) + "\n")
+                proc.stdin.flush()
+            elif m.get("t") == "closed":
+                break
+    except (OSError, ConnectionError):
+        pass
+    finally:
+        done.set()
+        ws.close()
+        try:
+            proc.stdin.write('{"t":"stop","reason":"viewer closed"}\n')
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+        try:
+            proc.wait(5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    return reason[0]
+
+
 # ------------------------------------------------------------------ the agent
 
 # ------------------------------------------------------------------ performance samples
@@ -1033,7 +1122,7 @@ class Agent:
     def command(self, cmd):
         cid, ctype, args = cmd["id"], cmd["type"], cmd.get("args") or {}
         log(f"command {ctype} ({cid})")
-        if ctype in ("terminal", "os-update", "profile", "fetch-file"):
+        if ctype in ("terminal", "stream", "os-update", "profile", "fetch-file"):
             threading.Thread(target=self._threaded, args=(cid, ctype, args), daemon=True).start()
             return
         try:
@@ -1058,6 +1147,8 @@ class Agent:
         try:
             if ctype == "terminal":
                 self.result(cid, True, terminal_session(args))
+            elif ctype == "stream":
+                self.result(cid, True, stream_session(args))
             elif ctype == "os-update":
                 ok, out = self.os_update(args.get("version") or "")
                 self.result(cid, ok, out)

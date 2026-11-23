@@ -1,6 +1,7 @@
 // Signage dashboard: a small hash-routed single page app, no build step.
 import { gzImageStream, imageStream, saveStream } from "./image.js";
 import { initParams, overrideForm, schemaForm, withOrder } from "./params.js";
+import { initLive, openLive } from "./live.js";
 import { initPerf, perfPanel } from "./perf.js";
 import { initPreview, previewPanel } from "./preview.js";
 import { bundledZips, listZip, readEntry } from "./zip.js";
@@ -9,6 +10,7 @@ const $main = document.getElementById("main");
 // (h and api are function declarations below, so they're hoisted.)
 initParams({ h, api });
 initPerf({ h, api });
+initLive({ h, api, toast });
 initPreview({ h, api });
 let info = null;
 let timer = null;
@@ -433,6 +435,7 @@ async function viewDevice(id) {
   const cmdBox = h("tbody");
   const shotsBox = h("div");
   const termBox = h("div");
+  const liveBox = h("div");
   let lastShotCmd = null;
 
   const title = h("h1");
@@ -570,6 +573,10 @@ async function viewDevice(id) {
       h("div", {}, h("a", { href: "#/devices", class: "small" }, "← Devices"), title),
       h("div", { class: "row" },
         h("button", { onclick: () => command("screenshot") }, "Screenshot"),
+        h("button", { title: "Watch the screen live and control it with your mouse and keyboard", onclick: () => {
+          const stopLive = openLive(id, liveBox, { outputs: (dev.summary?.display?.outputs || []).filter((o) => o.enabled).map((o) => o.name) });
+          if (stopLive) { const prev = cleanup; cleanup = () => { prev?.(); stopLive(); }; }
+        } }, "Live view"),
         h("button", { onclick: () => openTerminal(id, termBox) }, "Terminal"),
         h("button", { onclick: () => command("restart-player") }, "Restart player"),
         h("button", { onclick: () => command("resync") }, "Re-sync content"),
@@ -582,6 +589,7 @@ async function viewDevice(id) {
           if (v !== null) command("os-update", v.trim() ? { version: v.trim() } : {});
         } }, "Update OS"),
         h("button", { class: "danger", onclick: () => confirm(`Reboot ${dev.name}?`) && command("reboot") }, "Reboot"))),
+    liveBox,
     termBox,
     h("div", { class: "panel" }, h("h2", {}, "Performance, last hour"), perf),
     h("div", { class: "grid2" },

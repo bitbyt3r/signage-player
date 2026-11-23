@@ -1,0 +1,609 @@
+#!/usr/bin/python3
+"""Live view of the sign's screen for the dashboard, with remote mouse and
+keyboard. Started by signage-agent for a "stream" command; it relays the
+WebRTC handshake between this process and the browser over the terminal's
+WebSocket relay, and the video then goes straight to the browser.
+
+  screen ─ ffmpeg (kmsgrab ─ VAAPI H.264) ─ pipe ─ GStreamer webrtcbin ═ browser
+  browser ─ data channel "input" ─ uinput tablet and keyboard ─ cage
+
+Talks to the agent in JSON lines:
+  argv[1]  {"ice_servers": [...], "quality": "native"|"1080"|"720",
+            "output": "DP-1"|"", "control": true, "bitrate": 0}
+  stdout   {"t":"offer","sdp":...}  {"t":"info",...}  {"t":"error","message":...}
+  stdin    {"t":"answer","sdp":...}  {"t":"stop"}
+
+SIGNAGE_STREAM_SOURCE=test swaps the screen for ffmpeg's test pattern
+(software x264), for testing without a GPU or a Wayland session.
+"""
+
+import ctypes
+import ctypes.util
+import fcntl
+import json
+import os
+import select
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import threading
+import time
+import urllib.parse
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gst", "1.0")
+gi.require_version("GstWebRTC", "1.0")
+gi.require_version("GstSdp", "1.0")
+from gi.repository import GLib, Gst, GstSdp, GstWebRTC  # noqa: E402
+
+FPS = 30
+GATHER_TIMEOUT = 6      # seconds to wait for ICE candidates before sending the offer
+ANSWER_TIMEOUT = 60     # seconds to wait for the browser's answer
+QUALITY = {"native": None, "1080": (1920, 1080), "720": (1280, 720)}
+
+
+def log(msg):
+    print(f"signage-stream: {msg}", file=sys.stderr, flush=True)
+
+
+out_lock = threading.Lock()
+
+
+def emit(msg):
+    with out_lock:
+        sys.stdout.write(json.dumps(msg) + "\n")
+        sys.stdout.flush()
+
+
+# ------------------------------------------------------------------ outputs
+
+def wlr_outputs():
+    """Enabled outputs from wlr-randr: name, mode size, transform, and the
+    logical rectangle in the layout (what the pointer moves over)."""
+    r = subprocess.run(["wlr-randr", "--json"], capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or "wlr-randr failed").strip())
+    outs = []
+    for o in json.loads(r.stdout):
+        if not o.get("enabled"):
+            continue
+        mode = next((m for m in o.get("modes", []) if m.get("current")), None)
+        if not mode:
+            continue
+        t = str(o.get("transform") or "normal")
+        s = o.get("scale") or 1
+        w, h = mode["width"], mode["height"]
+        lw, lh = (h, w) if t.endswith("90") or t.endswith("270") else (w, h)
+        pos = o.get("position") or {}
+        outs.append({"name": o["name"], "width": w, "height": h, "transform": t,
+                     "x": pos.get("x", 0), "y": pos.get("y", 0),
+                     "lwidth": round(lw / s), "lheight": round(lh / s)})
+    if not outs:
+        raise RuntimeError("no enabled outputs")
+    return sorted(outs, key=lambda o: (o["x"], o["y"]))
+
+
+class DrmModeRes(ctypes.Structure):
+    _fields_ = [("count_fbs", ctypes.c_int), ("fbs", ctypes.POINTER(ctypes.c_uint32)),
+                ("count_crtcs", ctypes.c_int), ("crtcs", ctypes.POINTER(ctypes.c_uint32)),
+                ("count_connectors", ctypes.c_int), ("connectors", ctypes.POINTER(ctypes.c_uint32)),
+                ("count_encoders", ctypes.c_int), ("encoders", ctypes.POINTER(ctypes.c_uint32)),
+                ("min_width", ctypes.c_uint32), ("max_width", ctypes.c_uint32),
+                ("min_height", ctypes.c_uint32), ("max_height", ctypes.c_uint32)]
+
+
+class DrmModeConnector(ctypes.Structure):
+    _fields_ = [("connector_id", ctypes.c_uint32), ("encoder_id", ctypes.c_uint32),
+                ("connector_type", ctypes.c_uint32), ("connector_type_id", ctypes.c_uint32)]
+    # (the rest of the struct isn't read; libdrm allocates and frees it)
+
+
+class DrmModeEncoder(ctypes.Structure):
+    _fields_ = [("encoder_id", ctypes.c_uint32), ("encoder_type", ctypes.c_uint32),
+                ("crtc_id", ctypes.c_uint32), ("possible_crtcs", ctypes.c_uint32),
+                ("possible_clones", ctypes.c_uint32)]
+
+
+def drm_crtcs():
+    """{output name: (card path, CRTC id)} for every lit connector, named the
+    way wlroots names outputs (DP-1, HDMI-A-1, ...)."""
+    lib = ctypes.CDLL(ctypes.util.find_library("drm") or "libdrm.so.2")
+    lib.drmModeGetResources.restype = ctypes.POINTER(DrmModeRes)
+    lib.drmModeGetConnector.restype = ctypes.POINTER(DrmModeConnector)
+    lib.drmModeGetEncoder.restype = ctypes.POINTER(DrmModeEncoder)
+    lib.drmModeGetConnectorTypeName.restype = ctypes.c_char_p
+    found = {}
+    for card in sorted(Path("/dev/dri").glob("card*")):
+        try:
+            fd = os.open(card, os.O_RDWR | os.O_CLOEXEC)
+        except OSError:
+            continue
+        try:
+            res = lib.drmModeGetResources(fd)
+            if not res:
+                continue
+            for i in range(res.contents.count_connectors):
+                con = lib.drmModeGetConnector(fd, res.contents.connectors[i])
+                if not con:
+                    continue
+                c = con.contents
+                tname = lib.drmModeGetConnectorTypeName(c.connector_type)
+                name = f"{tname.decode() if tname else 'Unknown'}-{c.connector_type_id}"
+                if c.encoder_id:
+                    enc = lib.drmModeGetEncoder(fd, c.encoder_id)
+                    if enc:
+                        if enc.contents.crtc_id:
+                            found[name] = (str(card), enc.contents.crtc_id)
+                        lib.drmModeFreeEncoder(enc)
+                lib.drmModeFreeConnector(con)
+            lib.drmModeFreeResources(res)
+        finally:
+            os.close(fd)
+    return found
+
+
+def even(n):
+    return max(2, int(n) // 2 * 2)
+
+
+def fit(w, h, quality):
+    """Encoded size: the mode size, scaled down to fit the quality's box
+    (compared in the screen's own orientation)."""
+    box = QUALITY.get(quality)
+    if not box:
+        return even(w), even(h)
+    bw, bh = box if w >= h else box[::-1]
+    s = min(1.0, bw / w, bh / h)
+    return even(w * s), even(h * s)
+
+
+def default_bitrate(w, h):
+    # About 0.1 bit per pixel at 30 fps: 6 Mb/s at 1080p, capped for 4K.
+    return int(min(16e6, max(1.5e6, w * h * FPS * 0.1)))
+
+
+# ------------------------------------------------------------------ ffmpeg
+
+def ffmpeg_cmd(source, w, h, bitrate, hw):
+    common = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin"]
+    gop = ["-g", str(FPS * 2), "-bf", "0"]
+    out = ["-f", "h264", "-flush_packets", "1", "pipe:1"]
+    if source.get("test"):
+        return common + ["-re", "-f", "lavfi", "-i", f"testsrc2=size={w}x{h}:rate={FPS}",
+                         "-vf", "format=yuv420p", "-c:v", "libx264", "-preset", "ultrafast",
+                         "-tune", "zerolatency", "-profile:v", "baseline",
+                         "-b:v", str(bitrate), "-maxrate", str(bitrate), "-bufsize", str(bitrate // 2)] + gop + out
+    grab = ["-device", source["card"], "-f", "kmsgrab", "-crtc_id", str(source["crtc"]),
+            "-framerate", str(FPS), "-i", "-"]
+    if hw:
+        # Zero copy: the scanout buffer goes to the GPU's scaler and encoder
+        # without passing through system memory.
+        return common + grab + [
+            "-vf", f"hwmap=derive_device=vaapi,scale_vaapi=w={w}:h={h}:format=nv12",
+            "-c:v", "h264_vaapi", "-profile:v", "constrained_baseline", "-rc_mode", "CBR",
+            "-b:v", str(bitrate), "-maxrate", str(bitrate)] + gop + out
+    return common + grab + [
+        "-vf", f"hwdownload,format=bgr0,scale={w}:{h},format=yuv420p",
+        "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-profile:v", "baseline",
+        "-b:v", str(bitrate), "-maxrate", str(bitrate), "-bufsize", str(bitrate // 2)] + gop + out
+
+
+# ------------------------------------------------------------------ input (uinput)
+
+EV_SYN, EV_KEY, EV_REL, EV_ABS = 0, 1, 2, 3
+ABS_MAX = 65535
+REL_HWHEEL, REL_WHEEL, REL_WHEEL_HI_RES, REL_HWHEEL_HI_RES = 0x06, 0x08, 0x0B, 0x0C
+BTN = {0: 0x110, 1: 0x112, 2: 0x111, 3: 0x113, 4: 0x114}   # browser button -> BTN_LEFT, MIDDLE, RIGHT, SIDE, EXTRA
+UI_DEV_CREATE, UI_DEV_DESTROY = 0x5501, 0x5502
+UI_DEV_SETUP, UI_ABS_SETUP = 0x405C5503, 0x401C5504
+UI_SET_EVBIT, UI_SET_KEYBIT, UI_SET_RELBIT, UI_SET_ABSBIT = 0x40045564, 0x40045565, 0x40045566, 0x40045567
+
+# KeyboardEvent.code -> Linux key code (input-event-codes.h)
+KEYS = {
+    "Escape": 1, "Digit1": 2, "Digit2": 3, "Digit3": 4, "Digit4": 5, "Digit5": 6, "Digit6": 7,
+    "Digit7": 8, "Digit8": 9, "Digit9": 10, "Digit0": 11, "Minus": 12, "Equal": 13, "Backspace": 14,
+    "Tab": 15, "KeyQ": 16, "KeyW": 17, "KeyE": 18, "KeyR": 19, "KeyT": 20, "KeyY": 21, "KeyU": 22,
+    "KeyI": 23, "KeyO": 24, "KeyP": 25, "BracketLeft": 26, "BracketRight": 27, "Enter": 28,
+    "ControlLeft": 29, "KeyA": 30, "KeyS": 31, "KeyD": 32, "KeyF": 33, "KeyG": 34, "KeyH": 35,
+    "KeyJ": 36, "KeyK": 37, "KeyL": 38, "Semicolon": 39, "Quote": 40, "Backquote": 41,
+    "ShiftLeft": 42, "Backslash": 43, "KeyZ": 44, "KeyX": 45, "KeyC": 46, "KeyV": 47, "KeyB": 48,
+    "KeyN": 49, "KeyM": 50, "Comma": 51, "Period": 52, "Slash": 53, "ShiftRight": 54,
+    "NumpadMultiply": 55, "AltLeft": 56, "Space": 57, "CapsLock": 58, "F1": 59, "F2": 60, "F3": 61,
+    "F4": 62, "F5": 63, "F6": 64, "F7": 65, "F8": 66, "F9": 67, "F10": 68, "NumLock": 69,
+    "ScrollLock": 70, "Numpad7": 71, "Numpad8": 72, "Numpad9": 73, "NumpadSubtract": 74,
+    "Numpad4": 75, "Numpad5": 76, "Numpad6": 77, "NumpadAdd": 78, "Numpad1": 79, "Numpad2": 80,
+    "Numpad3": 81, "Numpad0": 82, "NumpadDecimal": 83, "IntlBackslash": 86, "F11": 87, "F12": 88,
+    "IntlRo": 89, "NumpadEnter": 96, "ControlRight": 97, "NumpadDivide": 98, "PrintScreen": 99,
+    "AltRight": 100, "Home": 102, "ArrowUp": 103, "PageUp": 104, "ArrowLeft": 105,
+    "ArrowRight": 106, "End": 107, "ArrowDown": 108, "PageDown": 109, "Insert": 110, "Delete": 111,
+    "NumpadEqual": 117, "Pause": 119, "NumpadComma": 121, "IntlYen": 124, "MetaLeft": 125,
+    "MetaRight": 126, "ContextMenu": 127, "F13": 183, "F14": 184, "F15": 185, "F16": 186,
+    "F17": 187, "F18": 188, "F19": 189, "F20": 190, "F21": 191, "F22": 192, "F23": 193, "F24": 194,
+    "AudioVolumeMute": 113, "AudioVolumeDown": 114, "AudioVolumeUp": 115,
+    "BrowserBack": 158, "BrowserForward": 159, "BrowserRefresh": 173,
+}
+
+
+class UInput:
+    """One virtual input device. Created when the viewer may control the
+    sign and destroyed when the stream ends (so cage hides its pointer)."""
+
+    def __init__(self, name, keys=(), rels=(), absolute=False):
+        self.fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK | os.O_CLOEXEC)
+        if keys:
+            fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_KEY)
+            for k in keys:
+                fcntl.ioctl(self.fd, UI_SET_KEYBIT, k)
+        if rels:
+            fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_REL)
+            for r in rels:
+                fcntl.ioctl(self.fd, UI_SET_RELBIT, r)
+        if absolute:
+            # A tablet-like absolute pointer (like QEMU's usb-tablet):
+            # libinput maps 0..ABS_MAX across the whole output layout.
+            fcntl.ioctl(self.fd, UI_SET_EVBIT, EV_ABS)
+            for axis in (0, 1):
+                fcntl.ioctl(self.fd, UI_SET_ABSBIT, axis)
+                fcntl.ioctl(self.fd, UI_ABS_SETUP, struct.pack("HxxiiiiII", axis, 0, 0, ABS_MAX, 0, 0, 0))
+        setup = struct.pack("HHHH80sI", 0x06, 0x1d6b, 0x0104, 1, name.encode()[:79], 0)
+        fcntl.ioctl(self.fd, UI_DEV_SETUP, setup)
+        fcntl.ioctl(self.fd, UI_DEV_CREATE)
+
+    def emit(self, events):
+        buf = b"".join(struct.pack("llHHi", 0, 0, t, c, v) for t, c, v in events)
+        os.write(self.fd, buf + struct.pack("llHHi", 0, 0, EV_SYN, 0, 0))
+
+    def close(self):
+        try:
+            fcntl.ioctl(self.fd, UI_DEV_DESTROY)
+        except OSError:
+            pass
+        os.close(self.fd)
+
+
+class Input:
+    """Turns the viewer's events into uinput events. Coordinates arrive as
+    0..1 across the streamed output, upright as people see it, and are mapped
+    into the whole layout (the absolute pointer covers every output)."""
+
+    def __init__(self, output, outputs):
+        self.pointer = UInput("signage remote pointer", keys=list(BTN.values()),
+                              rels=[REL_WHEEL, REL_HWHEEL, REL_WHEEL_HI_RES, REL_HWHEEL_HI_RES], absolute=True)
+        self.keyboard = UInput("signage remote keyboard", keys=sorted(set(KEYS.values())))
+        self.out = output
+        self.x0 = min(o["x"] for o in outputs)
+        self.y0 = min(o["y"] for o in outputs)
+        self.w = max(o["x"] + o["lwidth"] for o in outputs) - self.x0
+        self.h = max(o["y"] + o["lheight"] for o in outputs) - self.y0
+        self.down = set()
+
+    def handle(self, m):
+        t = m.get("t")
+        if t == "m":
+            x = self.out["x"] + min(1, max(0, float(m["x"]))) * self.out["lwidth"]
+            y = self.out["y"] + min(1, max(0, float(m["y"]))) * self.out["lheight"]
+            self.pointer.emit([(EV_ABS, 0, round((x - self.x0) / max(1, self.w) * ABS_MAX)),
+                               (EV_ABS, 1, round((y - self.y0) / max(1, self.h) * ABS_MAX))])
+        elif t == "b" and int(m.get("b", -1)) in BTN:
+            code = BTN[int(m["b"])]
+            self.press(self.pointer, code, bool(m.get("d")))
+        elif t == "w":
+            # Browser deltas in pixels (deltaMode 0); about 120 px a notch.
+            ev = []
+            for axis, hi, sign, key in ((REL_WHEEL, REL_WHEEL_HI_RES, -1, "dy"), (REL_HWHEEL, REL_HWHEEL_HI_RES, 1, "dx")):
+                v = round(sign * float(m.get(key, 0)))
+                if v:
+                    ev.append((EV_REL, hi, max(-1200, min(1200, v))))
+                    notches = int(v / 120)
+                    if notches:
+                        ev.append((EV_REL, axis, notches))
+            if ev:
+                self.pointer.emit(ev)
+        elif t == "k" and m.get("c") in KEYS:
+            self.press(self.keyboard, KEYS[m["c"]], bool(m.get("d")))
+        elif t == "release":
+            self.release_all()
+
+    def press(self, dev, code, down):
+        if down == ((dev, code) in self.down):
+            return
+        (self.down.add if down else self.down.discard)((dev, code))
+        dev.emit([(EV_KEY, code, 1 if down else 0)])
+
+    def release_all(self):
+        for dev, code in list(self.down):
+            self.press(dev, code, False)
+
+    def close(self):
+        try:
+            self.release_all()
+        except OSError:
+            pass
+        self.pointer.close()
+        self.keyboard.close()
+
+
+class EchoInput:
+    """Test mode: reports input events instead of injecting them."""
+
+    def handle(self, m):
+        emit({"t": "echo", "m": m})
+
+    def close(self):
+        pass
+
+
+# ------------------------------------------------------------------ WebRTC
+
+def ice_config(webrtc, servers):
+    for s in servers or []:
+        urls = s.get("urls")
+        for url in [urls] if isinstance(urls, str) else (urls or []):
+            scheme, _, rest = url.partition(":")
+            rest, _, query = rest.partition("?")
+            if scheme == "stun" and not webrtc.get_property("stun-server"):
+                webrtc.set_property("stun-server", f"stun://{rest}")
+            elif scheme in ("turn", "turns"):
+                user = urllib.parse.quote(str(s.get("username", "")), safe="")
+                cred = urllib.parse.quote(str(s.get("credential", "")), safe="")
+                uri = f"{scheme}://{user}:{cred}@{rest}" + (f"?{query}" if query else "")
+                webrtc.emit("add-turn-server", uri)
+
+
+class Stream:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.loop = GLib.MainLoop()
+        self.ffmpeg = None
+        self.input = None
+        self.pipe = None
+        self.offered = False
+        self.negotiating = False
+        self.channel = None
+        self.answered = False
+        self.reason = "stopped"
+
+    # -- setup
+
+    def pick_source(self):
+        if os.environ.get("SIGNAGE_STREAM_SOURCE") == "test":
+            w, h = fit(1920, 1080, self.cfg.get("quality") or "720")
+            out = {"name": "TEST-1", "width": w, "height": h, "transform": "normal", "x": 0, "y": 0,
+                   "lwidth": w, "lheight": h}
+            return {"test": True}, out, [out]
+        outputs = wlr_outputs()
+        want = self.cfg.get("output") or ""
+        out = next((o for o in outputs if o["name"] == want), None) if want else outputs[0]
+        if not out:
+            raise RuntimeError(f"output {want} isn't on")
+        crtcs = drm_crtcs()
+        if out["name"] not in crtcs:
+            raise RuntimeError(f"couldn't find {out['name']}'s CRTC (lit connectors: {', '.join(crtcs) or 'none'})")
+        card, crtc = crtcs[out["name"]]
+        return {"card": card, "crtc": crtc}, out, outputs
+
+    def start_ffmpeg(self, source, w, h, bitrate):
+        """Hardware encode if the GPU does it, otherwise x264 at no more than 720p."""
+        last = ""
+        for hw in ([False] if source.get("test") else [True, False]):
+            ew, eh = (w, h) if hw or source.get("test") else fit(w, h, "720")
+            cmd = ffmpeg_cmd(source, ew, eh, bitrate, hw)
+            log(" ".join(cmd))
+            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # Wait for the first bytes of video: a failure (no VAAPI, kmsgrab
+            # refused) exits within a second or two.
+            r, _, _ = select.select([p.stdout], [], [], 8)
+            if r and p.poll() is None:
+                threading.Thread(target=self.ffmpeg_log, args=(p,), daemon=True).start()
+                return p, ew, eh, "h264_vaapi" if hw else "libx264"
+            p.kill()
+            err = p.stderr.read().decode(errors="replace").strip()[-400:]
+            p.wait()
+            log(f"ffmpeg ({'VAAPI' if hw else 'x264'}) failed: {err}")
+            last = err
+        raise RuntimeError(f"couldn't capture the screen: {last or 'ffmpeg exited'}")
+
+    def ffmpeg_log(self, p):
+        for line in p.stderr:
+            log("ffmpeg: " + line.decode(errors="replace").rstrip())
+        code = p.wait()
+        if self.ffmpeg is p:
+            GLib.idle_add(self.stop, f"capture ended (ffmpeg exited with {code})")
+
+    def build(self):
+        source, out, outputs = self.pick_source()
+        w, h = fit(out["width"], out["height"], self.cfg.get("quality") or "native")
+        bitrate = int(self.cfg.get("bitrate") or 0) or default_bitrate(w, h)
+        self.ffmpeg, w, h, encoder = self.start_ffmpeg(source, w, h, bitrate)
+
+        self.pipe = Gst.parse_launch(
+            f"fdsrc name=src fd={self.ffmpeg.stdout.fileno()} do-timestamp=true blocksize=65536 "
+            "! video/x-h264,stream-format=byte-stream ! queue max-size-buffers=0 max-size-time=0 max-size-bytes=0 "
+            "! h264parse ! video/x-h264,stream-format=byte-stream,alignment=au "
+            "! rtph264pay config-interval=-1 aggregate-mode=zero-latency mtu=1200 pt=96 "
+            "! application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000 "
+            "! webrtcbin name=webrtc bundle-policy=max-bundle latency=0")
+        self.webrtc = self.pipe.get_by_name("webrtc")
+        ice_config(self.webrtc, self.cfg.get("ice_servers"))
+        self.webrtc.connect("on-negotiation-needed", self.on_negotiation_needed)
+        self.webrtc.connect("notify::ice-gathering-state", self.on_gathering)
+        self.webrtc.connect("notify::ice-connection-state", self.on_ice_state)
+        self.webrtc.connect("notify::connection-state", self.on_conn_state)
+        bus = self.pipe.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message::error", self.on_error)
+
+        if self.cfg.get("control") and source.get("test"):
+            self.input = EchoInput()
+        elif self.cfg.get("control"):
+            try:
+                self.input = Input(out, outputs)
+            except OSError as e:
+                emit({"t": "warning", "message": f"remote control unavailable: {e}"})
+        self.info = {"t": "info", "output": out["name"], "outputs": [o["name"] for o in outputs],
+                     "transform": out["transform"], "width": w, "height": h,
+                     "mode": f"{out['width']}x{out['height']}", "fps": FPS, "bitrate": bitrate,
+                     "encoder": encoder, "control": bool(self.input)}
+        emit(self.info)
+        self.pipe.set_state(Gst.State.PLAYING)
+        # The browser sends mouse and keyboard events on this channel.
+        self.channel = self.webrtc.emit("create-data-channel", "input", None)
+        if self.channel:
+            self.channel.connect("on-message-string", self.on_input)
+
+    # -- negotiation (non-trickle: one offer, one answer, candidates inside;
+    # the relay can reorder messages, so fewer of them is simpler)
+
+    def on_negotiation_needed(self, webrtc):
+        if self.negotiating:
+            return
+        self.negotiating = True
+        promise = Gst.Promise.new_with_change_func(self.on_offer_created, webrtc)
+        webrtc.emit("create-offer", None, promise)
+
+    def on_offer_created(self, promise, webrtc):
+        promise.wait()
+        reply = promise.get_reply()
+        offer = reply.get_value("offer") if reply and reply.has_field("offer") else None
+        if not offer:
+            err = reply.get_value("error") if reply and reply.has_field("error") else None
+            GLib.idle_add(self.stop, f"couldn't create the offer: {err.message if err else reply}")
+            return
+        webrtc.emit("set-local-description", offer, Gst.Promise.new())
+        GLib.timeout_add_seconds(GATHER_TIMEOUT, self.send_offer)
+
+    def on_gathering(self, webrtc, _pspec):
+        if webrtc.get_property("ice-gathering-state") == GstWebRTC.WebRTCICEGatheringState.COMPLETE:
+            GLib.idle_add(self.send_offer)
+
+    def send_offer(self):
+        if self.offered:
+            return False
+        desc = self.webrtc.get_property("local-description")
+        if not desc:
+            return False
+        self.offered = True
+        emit({"t": "offer", "sdp": desc.sdp.as_text()})
+        GLib.timeout_add_seconds(ANSWER_TIMEOUT, self.answer_timeout)
+        return False
+
+    def answer_timeout(self):
+        if not self.answered:
+            self.stop("the viewer didn't answer")
+        return False
+
+    def on_answer(self, sdp):
+        ok, msg = GstSdp.SDPMessage.new_from_text(sdp)
+        if ok != GstSdp.SDPResult.OK:
+            raise ValueError("bad SDP answer")
+        self.answered = True
+        answer = GstWebRTC.WebRTCSessionDescription.new(GstWebRTC.WebRTCSDPType.ANSWER, msg)
+        self.webrtc.emit("set-remote-description", answer, Gst.Promise.new())
+
+    def on_ice_state(self, webrtc, _pspec):
+        state = webrtc.get_property("ice-connection-state")
+        log(f"ICE {state.value_nick}")
+        if state == GstWebRTC.WebRTCICEConnectionState.FAILED:
+            GLib.idle_add(self.stop, "no network path to the viewer (ICE failed; a TURN server may be needed)")
+
+    def on_conn_state(self, webrtc, _pspec):
+        state = webrtc.get_property("connection-state")
+        log(f"connection {state.value_nick}")
+        if state == GstWebRTC.WebRTCPeerConnectionState.CONNECTED:
+            emit({"t": "connected"})
+        elif state in (GstWebRTC.WebRTCPeerConnectionState.FAILED, GstWebRTC.WebRTCPeerConnectionState.CLOSED):
+            GLib.idle_add(self.stop, f"connection {state.value_nick}")
+
+    def on_input(self, _ch, text):
+        if not self.input:
+            return
+        try:
+            for m in json.loads(text) if text.startswith("[") else [json.loads(text)]:
+                self.input.handle(m)
+        except (ValueError, KeyError, TypeError, OSError) as e:
+            log(f"bad input event {text[:80]!r}: {e}")
+
+    def on_error(self, _bus, msg):
+        err, dbg = msg.parse_error()
+        log(f"GStreamer: {err.message} ({dbg})")
+        if msg.src and msg.src.get_name().startswith("sctp"):
+            # The data channel's association drops when the browser closes
+            # the connection (often just before its "stop" arrives).
+            self.stop("closed by the viewer")
+        else:
+            self.stop(f"GStreamer: {err.message}")
+
+    # -- control from the agent
+
+    def read_stdin(self):
+        for line in sys.stdin:
+            try:
+                m = json.loads(line)
+            except ValueError:
+                continue
+            if m.get("t") == "answer":
+                GLib.idle_add(self._answer, m.get("sdp", ""))
+            elif m.get("t") == "stop":
+                GLib.idle_add(self.stop, m.get("reason") or "closed by the viewer")
+                return
+        GLib.idle_add(self.stop, "agent went away")
+
+    def _answer(self, sdp):
+        try:
+            self.on_answer(sdp)
+        except Exception as e:
+            self.stop(f"couldn't use the viewer's answer: {e}")
+        return False
+
+    def stop(self, reason="stopped"):
+        if not self.loop.is_running():
+            return False
+        self.reason = reason
+        self.loop.quit()
+        return False
+
+    def run(self):
+        try:
+            self.build()
+        except Exception as e:
+            emit({"t": "error", "message": str(e)})
+            self.cleanup()
+            return 1
+        threading.Thread(target=self.read_stdin, daemon=True).start()
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, sig, self.stop, "terminated")
+        self.loop.run()
+        emit({"t": "ended", "reason": self.reason})
+        self.cleanup()
+        return 0
+
+    def cleanup(self):
+        if self.input:
+            self.input.close()
+            self.input = None
+        p, self.ffmpeg = self.ffmpeg, None
+        if p and p.poll() is None:
+            p.terminate()
+            try:
+                p.wait(3)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        if self.pipe:
+            self.pipe.set_state(Gst.State.NULL)
+
+
+def main():
+    cfg = json.loads(sys.argv[1]) if len(sys.argv) > 1 else {}
+    if not shutil.which("ffmpeg"):
+        emit({"t": "error", "message": "ffmpeg isn't installed (this OS image predates live view)"})
+        return 1
+    Gst.init(None)
+    return Stream(cfg).run()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

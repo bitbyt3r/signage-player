@@ -20,6 +20,13 @@ jobs:
           python-version: "3.13"
       - run: pip install boto3 "moto[server,dynamodb,s3]" pytest cfn-lint websockets
       - run: cfn-lint template.yaml
+      - name: Live view test dependencies (GStreamer WebRTC, ffmpeg, Chromium)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg gstreamer1.0-plugins-bad gstreamer1.0-plugins-good gstreamer1.0-nice python3-gst-1.0 gir1.2-gst-plugins-bad-1.0
+          npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright@1.49.1
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+          echo "NODE_PATH=$RUNNER_TEMP/pw/node_modules" >>"$GITHUB_ENV"
       - run: python -m pytest -q tests/
       - name: FAT32 builder
         run: |
