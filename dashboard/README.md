@@ -157,6 +157,18 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   text. `"format": "color"` gets a colour picker. On a device page,
   *Graphic parameters* sets values for that device only, such as its room;
   they replace the program's values in every item of that graphic.
+- **Live preview**: the program editor plays the unsaved program beside the
+  form (above it on narrow screens) in the real player, the same files as
+  `mkosi.extra/usr/share/signage/player/` (`src/static/player` is a symlink
+  to them, so the preview always matches what the signs run). Edits show
+  within a couple of seconds; a newly activated package version shows within
+  20 seconds. *Show as* picks a 1920×1080 screen, the LED arch, or a device
+  (its room and other parameters, and its layout). *Pop out* opens it in its
+  own window, which keeps following the editor. Nothing is saved and no
+  device is created: `POST /api/preview` resolves the draft the way a
+  check-in would, and the browser's service worker (`sw.js`) answers the
+  player's `/content.json`, `/status/...` and `/packages/...` requests,
+  unzipping packages from S3 in the browser.
 - **Packages**: upload an OGraf graphic as a zip (its `*.ograf.json` manifest
   plus files). Versions are immutable. Programs use the package's *active*
   version unless an item pins one, so *Make active* rolls a version out to

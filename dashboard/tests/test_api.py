@@ -396,6 +396,56 @@ def test_profile_and_fetch_file(aws):
     assert all("upload_url" not in c["args"] for c in dev["commands"])
 
 
+def test_preview(aws):
+    token = login()
+    upload_package(token, make_zip("1.0.0"))
+    upload_package(token, make_zip("1.1.0"), activate=False)
+    draft = {"name": "", "layers": [{"name": "Main", "layer": 10, "items": [
+        {"package": "magfest-lower-third", "duration": 15, "data": {"title": "Draft"}},
+        {"package": "", "duration": 10}]}]}     # half-added graphic: left out
+    assert call("POST", "/api/preview", {"program": draft})[0] == 401
+    s, r = call("POST", "/api/preview", {"program": draft}, token)
+    assert s == 200, r
+    assert r["layout"] == "screen" and r["device"] is None
+    c = r["content"]
+    assert c["program"]["name"] == "Preview" and c["rev"]
+    [it] = c["layers"][0]["items"]
+    assert it["version"] == "1.0.0" and it["data"] == {"title": "Draft"}
+    assert it["url"] == "/packages/magfest-lower-third/1.0.0/"
+    [pkg] = c["packages"]
+    assert pkg["url"].startswith("https://") and pkg["root"] == "lower-third/"
+    # Activating another version shows in the next preview, like on a device.
+    call("PATCH", "/api/packages/magfest-lower-third", {"active_version": "1.1.0"}, token)
+    r2 = call("POST", "/api/preview", {"program": draft, "layout": "arch"}, token)[1]
+    assert r2["layout"] == "arch" and r2["content"]["layers"][0]["items"][0]["version"] == "1.1.0"
+    assert r2["content"]["rev"] != c["rev"]
+    # As a device: its parameters and layout.
+    did, _ = enroll("52:54:00:00:00:55")
+    s, r = call("PATCH", f"/api/devices/{did}", {"settings": {"device": {"name": "arch-1"}, "display": {"layout": "arch"}},
+                                                 "params": {"magfest-lower-third": {"title": "Device"}}}, token)
+    assert s == 200, r
+    r3 = call("POST", "/api/preview", {"program": draft, "device_id": did}, token)[1]
+    assert r3["layout"] == "arch" and r3["device"]["name"] == "arch-1"
+    assert r3["content"]["layers"][0]["items"][0]["data"]["title"] == "Device"
+    assert call("POST", "/api/preview", {"program": draft, "device_id": did, "layout": "screen"}, token)[1]["layout"] == "screen"
+    bad = {"layers": [{"name": "Main", "layer": 10, "items": [{"package": "a b"}]}]}
+    s, r = call("POST", "/api/preview", {"program": bad}, token)
+    assert s == 400 and r["errors"]
+    # Nothing was saved and no device appeared.
+    assert call("GET", "/api/programs", None, token)[1]["programs"] == []
+    assert [d["id"] for d in call("GET", "/api/devices", None, token)[1]["devices"]] == [did]
+
+
+def test_player_served_for_preview(aws):
+    s, body = call("GET", "/static/player/index.html")
+    assert s == 200 and "player" in body
+    assert call("GET", "/static/player/player.mjs")[0] == 200
+    s, body = call("GET", "/sw.js")
+    assert s == 200 and "preview" in body
+    s, body = call("GET", "/static/player/../../app.py")   # outside static: the app page, not the file
+    assert "<title>Signage Dashboard</title>" in body and "def " not in body
+
+
 def test_terminal_ws_auth(aws):
     did, tok = enroll()
     token = login()

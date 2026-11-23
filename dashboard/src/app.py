@@ -15,6 +15,7 @@ import os
 import re
 import time
 import traceback
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -26,7 +27,7 @@ import common as c
 import tomlw
 import validate
 
-STATIC = Path(__file__).parent / "static"
+STATIC = Path(os.path.abspath(os.path.dirname(__file__))) / "static"
 WS_URL = os.environ.get("WS_URL", "")
 ENROLL_TOKEN = os.environ.get("ENROLL_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
@@ -135,8 +136,10 @@ def static(path):
     name = path.lstrip("/")
     if name.startswith("static/"):
         name = name[7:]
-    f = (STATIC / name).resolve()
-    if STATIC.resolve() not in f.parents or not f.is_file():
+    # Normalise without resolving symlinks: static/player is a link to the
+    # image's player (the files are real copies in the deployed function).
+    f = Path(os.path.normpath(STATIC / name))
+    if STATIC not in f.parents or not f.is_file():
         f = STATIC / "index.html"  # client-side routes
     ctype = mimetypes.guess_type(f.name)[0] or "application/octet-stream"
     if f.suffix in (".js", ".mjs"):
@@ -405,16 +408,21 @@ def enroll(req):
     return resp(200, {"device_id": did, "token": token})
 
 
-def resolve_content(item):
+def resolve_content(item, program=None):
+    """What a device plays. program: an unsaved program to use instead of the
+    device's assigned one (the program editor's preview)."""
     pid = item.get("program_id") or ""
     content = {"program": None, "layers": [], "packages": [], "warnings": []}
-    if not pid:
-        return content
-    prog = c.get(f"PROGRAM#{pid}")
-    if not prog:
-        content["warnings"].append("assigned program no longer exists")
-        return content
-    p = c.loads(prog["data"])
+    if program is not None:
+        p = program
+    else:
+        if not pid:
+            return content
+        prog = c.get(f"PROGRAM#{pid}")
+        if not prog:
+            content["warnings"].append("assigned program no longer exists")
+            return content
+        p = c.loads(prog["data"])
     content["program"] = {"id": pid, "name": p["name"]}
     params = c.loads(item.get("params"), {})   # per-device graphic parameters, by package
     pkgs, vers, need = {}, {}, {}
@@ -628,6 +636,45 @@ def device_perf(req, did):
         kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
     samples.sort(key=lambda x: x["t"])
     return resp(200, {"samples": samples, "since": since, "now": time.time()})
+
+
+# ------------------------------------------------------------------ program preview
+# The program editor plays its unsaved program in the real player (served at
+# /static/player/) inside an iframe. The browser's service worker answers the
+# player's /content.json, /packages/... and /status/... requests, the way
+# signage-web does on a device; this resolves the content exactly as a device
+# check-in would (optionally with a real device's parameters and layout).
+
+@route("POST", "/api/preview")
+def preview_content(req):
+    body = req.json()
+    draft = body.get("program") if isinstance(body.get("program"), dict) else {}
+    # Drafts are often half filled in: leave out items that don't name a package yet.
+    layers = [{**l, "items": [it for it in (l.get("items") or []) if isinstance(it, dict) and it.get("package")]}
+              for l in (draft.get("layers") or []) if isinstance(l, dict)]
+    clean, errs = validate.program({**draft, "name": (draft.get("name") or "").strip() or "Preview", "layers": layers})
+    if errs:
+        raise HttpError(400, "the program has problems", {"errors": errs})
+    layout, params, device = "screen", {}, None
+    if body.get("device_id"):
+        dev = device_item(str(body["device_id"]))
+        params = c.loads(dev.get("params"), {})
+        layout = c.loads(dev.get("settings"), {}).get("display", {}).get("layout") or "screen"
+        device = device_view(dev)
+    if body.get("layout") in ("screen", "arch"):
+        layout = body["layout"]
+    content = resolve_content({"program_id": "preview", "params": c.dumps(params)},
+                              program={**clean, "id": draft.get("id") or "preview"})
+    content["rev"] = c.sha256(c.dumps(content))[:16]
+    for layer in content["layers"]:
+        for it in layer["items"]:
+            it["url"] = f"/packages/{urllib.parse.quote(it['package'])}/{urllib.parse.quote(it['version'])}/"
+    for p in content["packages"]:
+        p["url"] = c.s3().generate_presigned_url(
+            "get_object", Params={"Bucket": c.BUCKET, "Key": f"packages/{p['id']}/{p['version']}.zip"}, ExpiresIn=3600)
+    disp = (device or {}).get("summary", {}).get("display", {}) if device else {}
+    return resp(200, {"content": content, "layout": layout,
+                      "device": {"name": device["name"], "display": disp} if device else None})
 
 
 # ------------------------------------------------------------------ programs

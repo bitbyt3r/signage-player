@@ -2,11 +2,13 @@
 import { gzImageStream, imageStream, saveStream } from "./image.js";
 import { initParams, overrideForm, schemaForm, withOrder } from "./params.js";
 import { initPerf, perfPanel } from "./perf.js";
+import { initPreview, previewPanel } from "./preview.js";
 
 const $main = document.getElementById("main");
 // (h and api are function declarations below, so they're hoisted.)
 initParams({ h, api });
 initPerf({ h, api });
+initPreview({ h, api });
 let info = null;
 let timer = null;
 let cleanup = null;
@@ -759,7 +761,7 @@ async function viewProgram(id) {
         it.label && pkg ? h("span", { class: "muted" }, ` ${pkg.name}`) : "",
         h("span", { class: "muted small" }, ` · ${bits.join(" · ")}`));
     };
-    const stop = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
+    const stop = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); preview.changed(); };
     const el = h("details", { class: "item", open: !!it._open, ontoggle: () => { it._open = el.open; } },
       h("summary", {}, sumText,
         h("span", { class: "item-tools" },
@@ -818,14 +820,20 @@ async function viewProgram(id) {
     }
   }
 
-  const save = async () => {
-    err.replaceChildren();
+  // The program as edited so far, or null while a JSON box can't be parsed.
+  const draft = () => {
     syncData();
     const bad = p.layers.flatMap((l) => l.items).find((it) => it._dataError);
     p.layers.forEach((l) => l.items.forEach((it) => delete it._dataError));
-    if (bad) return err.replaceChildren(h("div", { class: "bad" }, "One of the graphic data boxes isn't valid JSON."));
-    const body = { name: name.value, description: desc.value, layers: p.layers.map((l) => ({
+    if (bad) return null;
+    return { name: name.value, description: desc.value, layers: p.layers.map((l) => ({
       name: l.name, layer: l.layer, items: l.items.map(({ _read, _dataError, _open, ...rest }) => rest) })) };
+  };
+
+  const save = async () => {
+    err.replaceChildren();
+    const body = draft();
+    if (!body) return err.replaceChildren(h("div", { class: "bad" }, "One of the graphic data boxes isn't valid JSON."));
     try {
       const saved = id === "new" ? await api("POST", "/api/programs", body) : await api("PUT", `/api/programs/${id}`, body);
       toast("Program saved; devices pick it up at their next check-in");
@@ -833,9 +841,16 @@ async function viewProgram(id) {
     } catch (e) { err.replaceChildren(h("div", { class: "bad" }, e.message), errorList(e)); }
   };
 
+  const preview = previewPanel(draft);
+  const editor = h("div", { class: "prog-editor" });
+  // Any edit (typing, picks, reorders, adds and removes) refreshes the preview.
+  for (const ev of ["input", "change", "click"]) editor.addEventListener(ev, (e) => {
+    if (ev === "click" && !e.target.closest("button")) return;
+    preview.changed();
+  });
+
   render();
-  setView(
-    h("div", {}, h("a", { href: "#/programs", class: "small" }, "← Programs"), h("h1", {}, id === "new" ? "New program" : p.name)),
+  editor.append(...[
     pk.length ? null : h("div", { class: "panel warn" }, "Upload an OGraf package first, on the ", h("a", { href: "#/packages" }, "Packages"), " page."),
     h("div", { class: "panel" }, h("div", { class: "fields" },
       h("label", { class: "field" }, h("span", {}, "Name"), name),
@@ -850,7 +865,11 @@ async function viewProgram(id) {
         if (!confirm(`Delete ${p.name}?`)) return;
         try { await api("DELETE", `/api/programs/${id}`); location.hash = "#/programs"; } catch (e) { toast(e.message); }
       } }, "Delete") : null),
-    err);
+    err].filter(Boolean));
+  setView(
+    h("div", {}, h("a", { href: "#/programs", class: "small" }, "← Programs"), h("h1", {}, id === "new" ? "New program" : p.name)),
+    h("div", { class: "prog-wrap" }, editor, h("aside", { class: "prog-side" }, preview.el)));
+  cleanup = () => preview.stop();
 }
 
 // ------------------------------------------------------------ packages

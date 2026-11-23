@@ -166,3 +166,19 @@ i.key.s1 { border-color: var(--s1); } i.key.s2 { border-color: var(--s2); } i.ke
 .perf-legend > span { display: inline-flex; gap: 12px; }
 .perf-tip { min-width: 280px; }
 .perf-tip-row > span:first-child { white-space: nowrap; }
+
+/* program editor with its live preview beside it on wide screens */
+.prog-wrap { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+.prog-editor { min-width: 0; }
+.prog-side { min-width: 0; order: -1; }
+@media (min-width: 1100px) {
+  .prog-wrap { grid-template-columns: minmax(0, 1fr) 400px; }
+  .prog-side { order: 0; position: sticky; top: 64px; }
+}
+details.preview > summary { cursor: pointer; }
+.preview-tools { margin: 10px 0 8px; }
+.preview-tools select { flex: 1 1 auto; min-width: 0; }
+.preview-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 6px;
+  background: #000; border: 1px solid var(--line); }
+.preview-frame { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: #000; }
+.preview-status { margin-top: 6px; }
