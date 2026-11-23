@@ -780,6 +780,8 @@ class Agent:
         self.poll = 15
         self.failures = 0
         self.perf = Perf()
+        self.syncing = False
+        self.sync_next = None
 
     # ---- status files for the on-screen overlay (/run/signage, no secrets)
 
@@ -1143,6 +1145,43 @@ class Agent:
                 self.results = results + self.results  # report them next time
             raise
 
+    def start_sync(self, content):
+        """Download packages in the background so check-ins keep flowing (and the
+        device stays online on the dashboard) while a big first sync runs. The
+        dashboard resends the content on every check-in until content_rev
+        matches, so a newer rev that arrives meanwhile is picked up next."""
+        with self.lock:
+            self.sync_next = content
+            if self.syncing:
+                return
+            self.syncing = True
+        if self.st.pop("force_verify", False):
+            for marker in PACKAGES.glob("*/*/.signage-sha256"):
+                marker.unlink()
+
+        def work():
+            try:
+                while True:
+                    with self.lock:
+                        c, self.sync_next = self.sync_next, None
+                        if c is None or c.get("rev") == self.st.get("content_rev"):
+                            self.syncing = False
+                            return
+                    if self.sync_content(c):
+                        self.st["content_rev"] = c.get("rev", "")
+                        self.save()
+                        self.wake.set()   # report the new rev now
+                    else:
+                        with self.lock:
+                            self.syncing = False
+                        return            # retried with the next check-in's content
+            except Exception as e:
+                log(f"content sync failed: {type(e).__name__}: {e}")
+                with self.lock:
+                    self.syncing = False
+
+        threading.Thread(target=work, daemon=True, name="sync").start()
+
     def handle(self, resp):
         self.poll = max(2, min(300, int(resp.get("poll_interval", 15))))
         self.perf.ack(resp.get("perf_ack"))
@@ -1151,11 +1190,7 @@ class Agent:
         if "settings" in resp:
             self.apply_settings(resp["settings"] or {}, int(resp.get("settings_rev", 0)))
         if "content" in resp:
-            if self.st.pop("force_verify", False):
-                for marker in PACKAGES.glob("*/*/.signage-sha256"):
-                    marker.unlink()
-            if self.sync_content(resp["content"]):
-                self.st["content_rev"] = resp["content"].get("rev", "")
+            self.start_sync(resp["content"])
         for cmd in resp.get("commands", []):
             self.command(cmd)
         self.save()

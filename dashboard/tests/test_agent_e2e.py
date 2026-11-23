@@ -89,6 +89,10 @@ def cycle(agent):
     url, token = agent.dashboard()
     ident = agent.identity(url, token)
     agent.handle(agent.checkin(url, ident))
+    # Content downloads run in a background thread; let it finish.
+    deadline = time.time() + 30
+    while agent.syncing and time.time() < deadline:
+        time.sleep(0.05)
     return ident
 
 
