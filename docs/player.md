@@ -163,11 +163,22 @@ How it's drawn:
 - `#layers`, the canvas every layer renders into, is fixed at 2760x2565 at
   the top left of the output. The header's output position is its canvas
   position, so it needs no copy.
-- Each leg is a div at its output position with
-  `background: -moz-element(#layers)`, offset to the leg's rect. Firefox
-  paints the canvas into it as an image, including the part below the
-  2160 px viewport, and repaints it as the canvas animates. Graphics run
-  and lay out once.
+- Each leg is a "view": a div at its output position, clipped to the leg's
+  size, holding its own 2760x2565 canvas root shifted so the leg's rect
+  lands in it. Every layer has a container in each root, and the player
+  runs one copy of each graphic per root (three on the arch): it creates
+  them together, loads them together and calls `playAction` on all of them
+  in the same task, so animations they start share a start time.
+- Why not one canvas painted into the legs with `-moz-element`: that makes
+  Firefox repaint and re-upload the whole canvas on the main thread every
+  frame anything moves, and keeps transform and opacity animations off the
+  compositor. With magfest-logo 1.3.2 on the arch it ran at about 30 fps.
+  With copies, each root animates on the compositor as on a screen.
+- The cost of copies: a graphic does its work (and its network requests)
+  once per copy, and anything random in it (positions, timings) can come
+  out differently in each copy, so it may not line up at the seams. A
+  graphic that wants seamless random motion can seed its own generator,
+  for example from the start time.
 - A black mask covers the canvas outside the header on the output.
 - The status screen and the update bar go in the header, sized as if it
   were a 16:9 screen of the header's height.
@@ -200,7 +211,7 @@ bar.
 On a screen it's `{layout: "screen", width, height, regions: {screen:
 [0, 0, w, h]}, visible: [[0, 0, w, h]]}` with the viewport size.
 
-`#layers` also has `data-layout="arch"` and the custom properties
+Each canvas root (`#layers` and the copies) has `data-layout="arch"` and the custom properties
 `--canvas-w`, `--canvas-h` and `--<region>-w` / `--<region>-h` (for example
 `--header-h`, `--left-w`, `--right-w`). They're inherited into a graphic's
 shadow DOM, so its CSS can use them. Each layer's container fills the
@@ -209,7 +220,8 @@ Use `%` of the host, or the properties above, instead.
 
 To design for the arch, open `scripts/ograf-preview.html?layout=arch`. It
 renders the graphic on the canvas with the door opening hatched, and can
-show the sliced output (in Firefox).
+show the sliced output (in Firefox; the preview still uses `-moz-element`
+for this, which is fine for checking a layout but not for its frame rate).
 
 ## Status screen
 

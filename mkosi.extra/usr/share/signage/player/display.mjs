@@ -1,12 +1,22 @@
 // The display layout: an ordinary screen, or a logical canvas cut into
 // pieces for an LED controller (layouts.mjs). See docs/player.md.
 //
-// For a sliced layout the canvas (#layers) is laid out once at the
-// canvas size from the top-left corner of the output, so a region whose
-// output position equals its canvas position (the arch header) needs no
-// copy. Each other region is a div at its output position painted with
-// -moz-element(#layers): Firefox paints the canvas into it as an image,
-// without laying out or running the graphics a second time.
+// For a sliced layout the canvas (#layers) is laid out at the canvas size
+// from the top-left corner of the output, so a region whose output position
+// equals its canvas position (the arch header) is shown in place. Each
+// other region is a "view": a div at its output position, clipped to the
+// region's size, holding its own canvas-sized root shifted so the region
+// lands in the view. The player runs one copy of every graphic per root,
+// started together.
+//
+// Why copies and not -moz-element(#layers): painting the canvas into an
+// image makes Firefox repaint and re-upload the whole 2760x2565 canvas on
+// the main thread every frame anything moves, and takes transform and
+// opacity animations off the compositor. Measured on the arch with
+// magfest-logo 1.3.2: about 30 fps, 41 ms of content paint per frame. With
+// copies every root animates on the compositor like an ordinary screen.
+// The cost: each graphic runs once per root, and anything random in a
+// graphic (positions, timings) can differ between the copies.
 import { LAYOUTS } from "./layouts.mjs";
 import { getJson } from "./status.mjs";
 
@@ -36,7 +46,7 @@ function box(rect, cls) {
     return el;
 }
 
-function debugOverlay(layersEl, d) {
+function debugOverlay(root, d) {
     const ov = document.createElement("div");
     ov.id = "debug";
     const add = (name, rect, cls) => {
@@ -51,17 +61,19 @@ function debugOverlay(layersEl, d) {
     } else {
         add("screen", d.visible[0], "region");
     }
-    layersEl.append(ov);
+    root.append(ov);
 }
 
 /**
  * Lay out the page for `layout`. layersEl is the canvas the graphics render
  * into; frameEl holds the status screen and the update bar and is put where
- * a person can see it. Returns the description graphics get as
- * globalThis.signageDisplay.
+ * a person can see it. Returns {display, roots}: display is the description
+ * graphics get as globalThis.signageDisplay, roots the canvas roots a copy
+ * of every layer goes into (layersEl first; one more per view).
  */
 export function setupDisplay(layout, layersEl, frameEl) {
     const L = LAYOUTS[layout];
+    const roots = [layersEl];
     let d;
     if (!L) {
         const w = innerWidth, h = innerHeight;
@@ -70,18 +82,9 @@ export function setupDisplay(layout, layersEl, frameEl) {
         const [cw, ch] = L.canvas;
         const regions = Object.fromEntries(Object.entries(L.regions).map(([k, r]) => [k, [...r.rect]]));
         d = { layout, width: cw, height: ch, regions, visible: Object.values(regions) };
-
         document.documentElement.dataset.layout = layout;
-        layersEl.dataset.layout = layout;
-        Object.assign(layersEl.style, { width: px(cw), height: px(ch) });
-        layersEl.style.setProperty("--canvas-w", px(cw));
-        layersEl.style.setProperty("--canvas-h", px(ch));
-        for (const [k, r] of Object.entries(L.regions)) {
-            layersEl.style.setProperty(`--${k}-w`, px(r.rect[2]));
-            layersEl.style.setProperty(`--${k}-h`, px(r.rect[3]));
-        }
 
-        // The output, front to back: slices, then a black mask over the
+        // The output, front to back: views, then a black mask over the
         // canvas outside the regions that are shown in place.
         const out = document.createElement("div");
         out.id = "output";
@@ -90,11 +93,24 @@ export function setupDisplay(layout, layersEl, frameEl) {
             const [x, y, w, h] = r.rect;
             const [ox, oy] = r.out;
             if (x === ox && y === oy) { inPlace.push(r.rect); continue; }
-            const s = box([ox, oy, w, h], "slice");
-            s.dataset.region = name;
-            s.style.backgroundSize = `${px(cw)} ${px(ch)}`;
-            s.style.backgroundPosition = `${px(-x)} ${px(-y)}`;
-            out.append(s);
+            const view = box([ox, oy, w, h], "view");
+            view.dataset.region = name;
+            const root = document.createElement("div");
+            root.className = "layers";
+            Object.assign(root.style, { left: px(-x), top: px(-y) });
+            view.append(root);
+            out.append(view);
+            roots.push(root);
+        }
+        for (const root of roots) {
+            root.dataset.layout = layout;
+            Object.assign(root.style, { width: px(cw), height: px(ch) });
+            root.style.setProperty("--canvas-w", px(cw));
+            root.style.setProperty("--canvas-h", px(ch));
+            for (const [k, r] of Object.entries(L.regions)) {
+                root.style.setProperty(`--${k}-w`, px(r.rect[2]));
+                root.style.setProperty(`--${k}-h`, px(r.rect[3]));
+            }
         }
         // Mask: the canvas area that isn't one of the in-place regions.
         // Done as the in-place rects' complement, one strip per edge of the
@@ -115,7 +131,7 @@ export function setupDisplay(layout, layersEl, frameEl) {
         // region like a 16:9 screen of its height.
         frameEl.style.setProperty("--u", px(home[3] * 16 / 9 / 100));
     }
-    if (DEBUG) debugOverlay(layersEl, d);
+    if (DEBUG) for (const root of roots) debugOverlay(root, d);
     globalThis.signageDisplay = Object.freeze(d);
-    return d;
+    return { display: d, roots };
 }

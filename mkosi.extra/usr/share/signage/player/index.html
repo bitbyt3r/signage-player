@@ -16,16 +16,17 @@
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; cursor: none; background: #000; }
   body { font-family: "DejaVu Sans", sans-serif; color: #e8eef2; }
-  #layers { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; z-index: 0; }
-  #layers > .layer { position: absolute; inset: 0; background: transparent; overflow: hidden; }
-  #layers > .layer > * { position: absolute; inset: 0; }
+  .layers { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; z-index: 0; }
+  .layers > .layer { position: absolute; inset: 0; background: transparent; overflow: hidden; }
+  .layers > .layer > * { position: absolute; inset: 0; }
 
-  /* Sliced layouts (display.mjs): the canvas is fixed-size at the top left,
-     each slice paints a part of it at its output position. */
+  /* Sliced layouts (display.mjs): the canvas (#layers) is fixed-size at the
+     top left; each view shows a region of its own copy of the canvas at the
+     region's output position. */
   #output { position: absolute; left: 0; top: 0; z-index: 1; }
   #output > div { position: absolute; }
   #output .mask { background: #000; z-index: 1; }
-  #output .slice { background: -moz-element(#layers) no-repeat; z-index: 2; }
+  #output .view { overflow: hidden; z-index: 2; }
 
   /* ?debug=1: region outlines, drawn on the canvas (so slices show them too). */
   #debug { position: absolute; inset: 0; z-index: 2147483000; pointer-events: none; }
@@ -58,7 +59,7 @@
   #update .label { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 calc(1.5 * var(--u));
                    text-shadow: 0 0 calc(0.3 * var(--u)) #000; }
 </style>
-<div id="layers"></div>
+<div id="layers" class="layers"></div>
 <div id="frame">
   <div id="status" hidden></div>
   <div id="update" hidden><div class="fill"></div><div class="label"></div></div>

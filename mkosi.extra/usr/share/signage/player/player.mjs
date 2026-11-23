@@ -82,16 +82,26 @@ async function createGraphic(item) {
     for (const [k, v] of Object.entries(manifest.schema?.properties || {})) {
         if (v && "default" in v) defaults[k] = v.default;
     }
-    return { el: document.createElement(tag), manifest, defaults };
+    // One element per canvas root (display.mjs): one on a screen, a copy
+    // per view on a sliced layout.
+    return { els: ROOTS.map(() => document.createElement(tag)), manifest, defaults };
 }
+
+// Run an action on every copy of a graphic at once (called in the same
+// task, so animations they start share a start time) and wait for all.
+const all = (els, fn) => Promise.all(els.map((el) => fn(el)));
 
 // ---------------------------------------------------------------- layers
 
 class LayerRunner {
     constructor(def) {
-        this.container = document.createElement("div");
-        this.container.className = "layer";
-        this.current = null;   // {item, el, defaults, started}
+        // One container per canvas root; the graphic's copies go in them.
+        this.containers = ROOTS.map(() => {
+            const c = document.createElement("div");
+            c.className = "layer";
+            return c;
+        });
+        this.current = null;   // {item, els, defaults, started}
         this.index = -1;       // position of the current item in this.items
         this.busy = false;     // a transition is running
         this.failed = new Map(); // itemKey -> skip until (ms)
@@ -104,8 +114,10 @@ class LayerRunner {
         this.name = def.name || `layer ${def.layer}`;
         this.perfKey ??= `layer:${Math.random()}`; // perf.mjs's on-screen list
         this.items = Array.isArray(def.items) ? def.items : [];
-        this.container.style.zIndex = String(Number(def.layer) || 0);
-        this.container.dataset.layer = this.name;
+        for (const c of this.containers) {
+            c.style.zIndex = String(Number(def.layer) || 0);
+            c.dataset.layer = this.name;
+        }
         for (const it of this.items) {
             for (const p of problems(it)) warn(`${this.name}: ${itemName(it)}: ${p}`);
         }
@@ -137,9 +149,11 @@ class LayerRunner {
     }
 
     async update(cur, item) {
-        if (typeof cur.el.updateAction !== "function") return;
+        if (typeof cur.els[0].updateAction !== "function") return;
         try {
-            checkResult(await withTimeout(cur.el.updateAction({ data: { ...cur.defaults, ...(item.data || {}) } }), T_PLAY, "updateAction"), "updateAction");
+            const data = { ...cur.defaults, ...(item.data || {}) };
+            const res = await withTimeout(all(cur.els, (el) => el.updateAction({ data: structuredClone(data) })), T_PLAY, "updateAction");
+            for (const r of res) checkResult(r, "updateAction");
             log(`${this.name}: updated ${itemName(item)}`);
         } catch (e) {
             this.fail(item, e);
@@ -209,37 +223,40 @@ class LayerRunner {
         this.current = null;
         markHidden(this.perfKey);
         try {
-            checkResult(await withTimeout(cur.el.stopAction?.({}), T_STOP, "stopAction"), "stopAction");
+            const res = await withTimeout(all(cur.els, (el) => el.stopAction?.({})), T_STOP, "stopAction");
+            for (const r of res) checkResult(r, "stopAction");
         } catch (e) { warn(`${this.name}: ${itemName(cur.item)}: ${e.message}`); }
         await this.dispose(cur);
     }
 
     async dispose(cur) {
-        try { await withTimeout(cur.el.dispose?.({}), T_DISPOSE, "dispose"); } catch (e) { warn(`${this.name}: ${itemName(cur.item)}: ${e.message}`); }
-        cur.el.remove();
+        try { await withTimeout(all(cur.els, (el) => el.dispose?.({})), T_DISPOSE, "dispose"); } catch (e) { warn(`${this.name}: ${itemName(cur.item)}: ${e.message}`); }
+        for (const el of cur.els) el.remove();
     }
 
     async mount(item) {
         let g;
         try {
             g = await createGraphic(item);
-            this.container.append(g.el);
-            const res = await withTimeout(g.el.load({
-                data: { ...g.defaults, ...(item.data || {}) },
+            g.els.forEach((el, i) => this.containers[i].append(el));
+            const data = { ...g.defaults, ...(item.data || {}) };
+            const loaded = await withTimeout(all(g.els, (el) => el.load({
+                data: structuredClone(data),
                 renderType: "realtime",
                 renderCharacteristics: { resolution: { width: DISPLAY.width, height: DISPLAY.height } },
-            }), T_LOAD, "load");
-            checkResult(res, "load");
-            const cur = { item, el: g.el, defaults: g.defaults, started: Date.now() };
+            })), T_LOAD, "load");
+            for (const r of loaded) checkResult(r, "load");
+            const cur = { item, els: g.els, defaults: g.defaults, started: Date.now() };
             this.current = cur;
-            checkResult(await withTimeout(g.el.playAction({}), T_PLAY, "playAction"), "playAction");
+            const played = await withTimeout(all(g.els, (el) => el.playAction({})), T_PLAY, "playAction");
+            for (const r of played) checkResult(r, "playAction");
             cur.started = Date.now();
             markVisible(this.perfKey, { layer: Number(this.def.layer) || 0, layer_name: this.name,
                 package: item.package, version: item.version, label: item.label });
             log(`${this.name}: playing ${itemName(item)}`);
         } catch (e) {
             this.fail(item, e);
-            if (g) await this.dispose({ item, el: g.el });
+            if (g) await this.dispose({ item, els: g.els });
             this.current = null;
         }
     }
@@ -254,7 +271,7 @@ class LayerRunner {
         while (this.busy) await sleep(100);
         await this.takeDown();
         markHidden(this.perfKey);
-        this.container.remove();
+        for (const c of this.containers) c.remove();
     }
 }
 
@@ -264,8 +281,9 @@ const layersEl = document.getElementById("layers");
 // The display layout (display.mjs): an ordinary screen, or the arch's one
 // logical canvas sliced to the LED controller. Fixed for the page's life;
 // a change in display.json reloads the page.
-const DISPLAY = setupDisplay((await wantedLayout()) || "screen", layersEl, document.getElementById("frame"));
-log(`layout ${DISPLAY.layout}, canvas ${DISPLAY.width}x${DISPLAY.height}`);
+// On a sliced layout every graphic runs once per canvas root (ROOTS).
+const { display: DISPLAY, roots: ROOTS } = setupDisplay((await wantedLayout()) || "screen", layersEl, document.getElementById("frame"));
+log(`layout ${DISPLAY.layout}, canvas ${DISPLAY.width}x${DISPLAY.height}, ${ROOTS.length} cop${ROOTS.length === 1 ? "y" : "ies"}`);
 const runners = new Map(); // layer key -> LayerRunner
 let content = null, rev = null, contentError = "";
 
@@ -280,7 +298,12 @@ function reconcile(next) {
     for (const [k, l] of wanted) {
         const r = runners.get(k);
         if (r) r.apply(l);
-        else { const nr = new LayerRunner(l); runners.set(k, nr); layersEl.append(nr.container); log(`layer added: ${nr.name}`); }
+        else {
+            const nr = new LayerRunner(l);
+            runners.set(k, nr);
+            nr.containers.forEach((c, i) => ROOTS[i].append(c));
+            log(`layer added: ${nr.name}`);
+        }
     }
     tick();
 }
