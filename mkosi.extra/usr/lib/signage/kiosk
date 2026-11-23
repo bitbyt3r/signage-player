@@ -123,4 +123,8 @@ fi
 
 # Firefox refuses a --profile directory that does not exist yet.
 mkdir -p "$HOME/firefox"
+# The sign is powered off or rebooted without Firefox exiting cleanly, so
+# the profile always holds a "previous session". Drop it, or Firefox shows
+# an "Open previous tabs?" bar across the top of the screen.
+rm -rf "$HOME/firefox/sessionstore.jsonlz4" "$HOME/firefox/sessionstore-backups"
 exec firefox-esr --kiosk --no-remote --profile "$HOME/firefox" "$URL"
