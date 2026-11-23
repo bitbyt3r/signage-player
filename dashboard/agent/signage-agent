@@ -569,6 +569,206 @@ def terminal_session(args):
 
 # ------------------------------------------------------------------ the agent
 
+# ------------------------------------------------------------------ performance samples
+# Every 10 s: CPU, memory, temperatures and GPU load from /proc and /sys, plus
+# the player's frame timings from /run/signage/perf.json (written every ~5 s,
+# so the sampler reads it more often and merges the windows it saw). Kept for
+# 2 h and sent with check-ins until the dashboard acknowledges them.
+
+PROC = Path(os.environ.get("SIGNAGE_PROC", "/proc"))
+SYS = Path(os.environ.get("SIGNAGE_SYS", "/sys"))
+PERF_EVERY = 10
+PERF_KEEP = 720
+PERF_BATCH = 120
+
+
+def _read(path, default=""):
+    try:
+        return Path(path).read_text()
+    except OSError:
+        return default
+
+
+def cpu_times():
+    """{"cpu": (busy, total), "cpu0": ...} from /proc/stat."""
+    out = {}
+    for line in _read(PROC / "stat").splitlines():
+        if not line.startswith("cpu"):
+            break
+        f = line.split()
+        v = [int(x) for x in f[1:9]]
+        idle = v[3] + v[4]
+        out[f[0]] = (sum(v) - idle, sum(v))
+    return out
+
+
+def meminfo():
+    m = {}
+    for line in _read(PROC / "meminfo").splitlines():
+        k, _, rest = line.partition(":")
+        try:
+            m[k] = int(rest.split()[0])
+        except (IndexError, ValueError):
+            pass
+    return m
+
+
+def firefox_rss_mb():
+    page = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
+    total = 0
+    for d in PROC.iterdir() if PROC.is_dir() else []:
+        if not d.name.isdigit():
+            continue
+        cmd = _read(d / "cmdline").split("\0", 1)[0]
+        if "firefox" not in os.path.basename(cmd):
+            continue
+        try:
+            total += int(_read(d / "statm").split()[1]) * page
+        except (IndexError, ValueError):
+            pass
+    return round(total / 2**20, 1) if total else None
+
+
+def hwmon_temps():
+    """{"k10temp": °C, "amdgpu": °C, ...} from temp1_input of each hwmon."""
+    out = {}
+    for d in sorted((SYS / "class/hwmon").glob("hwmon*")):
+        name = _read(d / "name").strip()
+        t = _read(d / "temp1_input").strip()
+        if name and t.lstrip("-").isdigit() and name not in out:
+            out[name] = int(t) / 1000
+    return out
+
+
+def cpu_temp(temps):
+    for name in ("k10temp", "coretemp", "zenpower", "cpu_thermal", "acpitz"):
+        if name in temps:
+            return temps[name]
+    zones = [int(t) / 1000 for z in (SYS / "class/thermal").glob("thermal_zone*")
+             if (t := _read(z / "temp").strip()).lstrip("-").isdigit()]
+    return max(zones) if zones else None
+
+
+def gpu_busy():
+    for f in sorted((SYS / "class/drm").glob("card*/device/gpu_busy_percent")):
+        v = _read(f).strip()
+        if v.isdigit():
+            return int(v)
+    return None
+
+
+def merge_frames(windows):
+    """Combine the player's perf.json windows seen during one sample."""
+    if not windows:
+        return {}
+    frames = sum(w.get("frames") or 0 for w in windows)
+    span = sum(w.get("window") or 0 for w in windows)
+    fm = [w.get("frame_ms") or {} for w in windows]
+
+    def agg(key, fn):
+        vals = [f[key] for f in fm if isinstance(f.get(key), (int, float))]
+        return round(fn(vals), 2) if vals else None
+    out = {
+        "fps": round(frames / span, 1) if span else (windows[-1].get("fps")),
+        "frame_p50": agg("p50", lambda v: sum(v) / len(v)),
+        "frame_p95": agg("p95", max),
+        "frame_p99": agg("p99", max),
+        "frame_max": agg("max", max),
+        "long_frames": sum(w.get("long_frames") or 0 for w in windows),
+        "layout": next((w["layout"] for w in reversed(windows) if w.get("layout")), None),
+    }
+    active = {}
+    for w in windows:
+        for a in (w.get("active") or [])[:32]:
+            if not isinstance(a, dict):
+                continue
+            key = (str(a.get("layer")), a.get("package"), a.get("version"), a.get("label"))
+            cur = active.get(key)
+            if not cur:
+                active[key] = {k: a.get(k) for k in ("layer", "layer_name", "package", "version", "label", "from", "to")}
+            else:
+                if isinstance(a.get("from"), (int, float)) and (cur["from"] is None or a["from"] < cur["from"]):
+                    cur["from"] = a["from"]
+                cur["to"] = None if a.get("to") is None or cur["to"] is None else max(cur["to"], a["to"])
+    for a in active.values():
+        for k in ("from", "to"):
+            if isinstance(a.get(k), float):
+                a[k] = round(a[k], 1)
+    out["active"] = [{k: v for k, v in a.items() if v is not None or k == "to"} for a in active.values()][:32]
+    return out
+
+
+class Perf:
+    def __init__(self):
+        self.samples = []
+        self.acked = 0.0
+        self.lock = threading.Lock()
+        self.prev_cpu = cpu_times()
+        self.windows = {}
+
+    def read_player(self):
+        p = read_json(RUN / "perf.json", None)
+        if isinstance(p, dict) and isinstance(p.get("t"), (int, float)) and time.time() - p["t"] <= 30:
+            self.windows[p["t"]] = p
+
+    def sample(self):
+        now = time.time()
+        cur = cpu_times()
+        s = {"t": round(now, 1)}
+
+        def pct(name):
+            a, b = self.prev_cpu.get(name), cur.get(name)
+            if not a or not b or b[1] <= a[1]:
+                return None
+            return round(100 * (b[0] - a[0]) / (b[1] - a[1]), 1)
+        s["cpu"] = pct("cpu")
+        cores = [x for x in (pct(k) for k in cur if k != "cpu") if x is not None]
+        s["cpu_max_core"] = max(cores) if cores else None
+        self.prev_cpu = cur
+        try:
+            s["load1"] = float(_read(PROC / "loadavg").split()[0])
+        except (IndexError, ValueError):
+            s["load1"] = None
+        m = meminfo()
+        if "MemTotal" in m:
+            s["mem_total_mb"] = round(m["MemTotal"] / 1024)
+            s["mem_used_mb"] = round((m["MemTotal"] - m.get("MemAvailable", m.get("MemFree", 0))) / 1024)
+        s["ff_rss_mb"] = firefox_rss_mb()
+        temps = hwmon_temps()
+        s["temp_cpu"] = cpu_temp(temps)
+        s["temp_gpu"] = temps.get("amdgpu")
+        s["gpu_busy"] = gpu_busy()
+        self.read_player()
+        wins = [w for t, w in sorted(self.windows.items()) if t > now - PERF_EVERY - 2.5]
+        self.windows = {}
+        s.update(merge_frames(wins))
+        with self.lock:
+            self.samples = (self.samples + [s])[-PERF_KEEP:]
+        return s
+
+    def run(self):
+        next_at = time.monotonic() + PERF_EVERY
+        while True:
+            time.sleep(2.5)
+            try:
+                self.read_player()
+                if time.monotonic() >= next_at:
+                    next_at += PERF_EVERY
+                    self.sample()
+            except Exception as e:  # never let stats take the agent down
+                log(f"perf sample failed: {type(e).__name__}: {e}")
+
+    def pending(self):
+        with self.lock:
+            return [x for x in self.samples if x["t"] > self.acked][:PERF_BATCH]
+
+    def ack(self, t):
+        if isinstance(t, (int, float)):
+            with self.lock:
+                self.acked = max(self.acked, t)
+                self.samples = [x for x in self.samples if x["t"] > self.acked]
+
+
 class Agent:
     def __init__(self):
         self.st = read_json(AGENT_STATE, {})
@@ -579,6 +779,7 @@ class Agent:
         self.reboot_requested = False
         self.poll = 15
         self.failures = 0
+        self.perf = Perf()
 
     # ---- status files for the on-screen overlay (/run/signage, no secrets)
 
@@ -929,6 +1130,9 @@ class Agent:
             "content_rev": self.st.get("content_rev") or read_json(CONTENT, {}).get("rev", ""),
             "results": results,
         }
+        perf = self.perf.pending()
+        if perf:
+            body["perf"] = perf
         if self.st.get("force_verify"):
             body["content_rev"] = ""
         try:
@@ -941,6 +1145,7 @@ class Agent:
 
     def handle(self, resp):
         self.poll = max(2, min(300, int(resp.get("poll_interval", 15))))
+        self.perf.ack(resp.get("perf_ack"))
         if self.st.pop("rollback", None):
             log("dashboard reachable after the network change; keeping it")
         if "settings" in resp:
@@ -959,6 +1164,7 @@ class Agent:
         AGENT.mkdir(parents=True, exist_ok=True)
         os.chmod(AGENT, 0o700)
         self.finish_update_after_boot()
+        threading.Thread(target=self.perf.run, daemon=True, name="perf").start()
         while True:
             url, token = self.dashboard()
             if not url:

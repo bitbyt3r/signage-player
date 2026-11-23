@@ -20,7 +20,7 @@ import zipfile
 from pathlib import Path
 
 import boto3
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 
 import common as c
 import tomlw
@@ -39,6 +39,7 @@ ONLINE_GRACE = 60  # last check-in within this many seconds = online
 SESSION_TTL = 12 * 3600
 CMD_TTL = 7 * 86400
 SHOT_TTL = 14 * 86400
+PERF_TTL = 3 * 3600
 COMMANDS = {"reboot", "restart-player", "screenshot", "os-update", "resync"}
 
 
@@ -475,6 +476,8 @@ def checkin(req):
             cmd["args"] = {k: v for k, v in cmd["args"].items() if k not in ("upload_url", "token")}
         c.update(pk, x["sk"], {"data": c.dumps(cmd)})
 
+    perf_ack = store_perf(pk, body.get("perf"))
+
     item = c.update(pk, "META", changes)
     out = {
         "server_time": time.time(),
@@ -483,6 +486,8 @@ def checkin(req):
         "ws_url": WS_URL,
         "settings_rev": int(item.get("settings_rev", 0)),
     }
+    if perf_ack:
+        out["perf_ack"] = perf_ack
     if int(body.get("settings_rev", -1)) != out["settings_rev"]:
         out["settings"] = c.loads(item.get("settings"), {})
 
@@ -515,6 +520,76 @@ def check_params(params):
     if len(c.dumps(out)) > 64000:
         raise HttpError(400, "params are too large")
     return out
+
+
+# ------------------------------------------------------------------ performance samples
+# The agent sends 10-second samples (CPU, memory, temperatures, frame timings
+# and the graphics on screen) with its check-ins; each batch is one item that
+# expires after PERF_TTL. The device page graphs the last hour.
+
+PERF_NUM = {"cpu", "cpu_max_core", "load1", "mem_used_mb", "mem_total_mb", "ff_rss_mb", "temp_cpu", "temp_gpu",
+            "gpu_busy", "fps", "frame_p50", "frame_p95", "frame_p99", "frame_max", "long_frames"}
+ACTIVE_KEYS = {"layer", "layer_name", "package", "version", "label", "from", "to"}
+
+
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) and abs(v) < 1e12 else None
+
+
+def clean_sample(x):
+    if not isinstance(x, dict) or _num(x.get("t")) is None:
+        return None
+    out = {"t": float(x["t"])}
+    for k in PERF_NUM:
+        if _num(x.get(k)) is not None:
+            out[k] = x[k]
+    if isinstance(x.get("layout"), str):
+        out["layout"] = x["layout"][:16]
+    act = []
+    for a in (x.get("active") or [])[:32] if isinstance(x.get("active"), list) else []:
+        if isinstance(a, dict):
+            act.append({k: (v if _num(v) is not None else str(v)[:80]) for k, v in a.items()
+                        if k in ACTIVE_KEYS and v is not None})
+    if act:
+        out["active"] = act
+    return out
+
+
+def store_perf(pk, perf):
+    """Store a batch of samples; returns the newest t to acknowledge (or None)."""
+    if not isinstance(perf, list) or not perf:
+        return None
+    samples = sorted((s for s in (clean_sample(x) for x in perf[:200]) if s), key=lambda s: s["t"])
+    if not samples:
+        return None
+    keep = [x for x in samples if x["t"] > time.time() - PERF_TTL]   # older ones would expire at once
+    if keep:
+        c.put({"pk": pk, "sk": f"PERF#{int(keep[0]['t'] * 1000):014d}", "data": c.dumps(keep),
+               "ttl": c.now() + PERF_TTL})
+    return samples[-1]["t"]
+
+
+@route("GET", "/api/devices/{did}/perf")
+def device_perf(req, did):
+    item = device_item(did)
+    try:
+        minutes = max(1, min(180, int(req.query.get("minutes", 60))))
+    except ValueError:
+        minutes = 60
+    since = time.time() - minutes * 60
+    # A batch can start up to its own length before `since`; look back a little further.
+    lo = f"PERF#{int((since - 1800) * 1000):014d}"
+    kw = {"KeyConditionExpression": Key("pk").eq(item["pk"]) & Key("sk").between(lo, "PERF#~"), "ConsistentRead": True}
+    samples = []
+    while True:
+        r = c.table().query(**kw)
+        for it in r["Items"]:
+            samples += [x for x in c.loads(it["data"]) if x["t"] >= since]
+        if "LastEvaluatedKey" not in r:
+            break
+        kw["ExclusiveStartKey"] = r["LastEvaluatedKey"]
+    samples.sort(key=lambda x: x["t"])
+    return resp(200, {"samples": samples, "since": since, "now": time.time()})
 
 
 # ------------------------------------------------------------------ programs

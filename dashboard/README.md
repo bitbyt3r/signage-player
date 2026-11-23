@@ -162,6 +162,12 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   version unless an item pins one, so *Make active* rolls a version out to
   every device, and switching back rolls it back. Versions that are active
   or pinned can't be deleted.
+- **Performance**: each device page graphs its last hour: frame time
+  (median and 95th percentile) and frame rate from the player, CPU and GPU
+  load, memory (and Firefox's share), and CPU and GPU temperature. Hover a
+  time to see every value then and which graphics were on screen. The agent
+  samples every 10 s and keeps 2 h if the dashboard is unreachable; the
+  dashboard keeps samples for 3 h.
 - **Terminal**: a root shell on the device, in the browser. The device opens
   the connection when asked (within a few seconds while you have its page
   open), so it works behind NAT. Close it with *Close* or `exit`.

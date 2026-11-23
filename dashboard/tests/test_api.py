@@ -349,6 +349,28 @@ def test_device_params_and_options(aws, monkeypatch):
     assert call("GET", "/api/options?source=schedule&list=tracks&base=http://10.0.0.1", None, token)[0] == 400
 
 
+def test_perf_samples(aws):
+    import time
+    token = login()
+    did, dtok = enroll("52:54:00:00:00:77")
+    now = time.time()
+    batch = [{"t": now - 20, "cpu": 12.5, "temp_cpu": 55.2, "fps": 60, "frame_p95": 18.1, "bogus": "x",
+              "active": [{"layer": 20, "package": "magfest-schedule", "version": "1.4.1", "label": "Panels", "from": now - 30, "to": None, "evil": 1}]},
+             {"t": now - 10, "cpu": "nope", "mem_used_mb": 1900, "mem_total_mb": 7800},
+             {"t": now - 7200 * 2, "cpu": 1}, "junk"]
+    s, r = call("POST", "/device/checkin", {"perf": batch}, device=(did, dtok))
+    assert s == 200 and r["perf_ack"] == batch[1]["t"]
+    call("POST", "/device/checkin", {"perf": [{"t": now - 5, "cpu": 30}]}, device=(did, dtok))
+    s, r = call("GET", f"/api/devices/{did}/perf?minutes=60", None, token)
+    assert s == 200
+    ts = [x["t"] for x in r["samples"]]
+    assert ts == sorted(ts) and len(ts) == 3   # the 4-hour-old sample is outside the hour
+    first = r["samples"][0]
+    assert "bogus" not in first and first["active"][0] == {"layer": 20, "package": "magfest-schedule", "version": "1.4.1", "label": "Panels", "from": now - 30}
+    assert "cpu" not in r["samples"][1] and r["samples"][1]["mem_used_mb"] == 1900
+    assert "perf_ack" not in call("POST", "/device/checkin", {}, device=(did, dtok))[1]
+
+
 def test_terminal_ws_auth(aws):
     did, tok = enroll()
     token = login()

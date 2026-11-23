@@ -1,10 +1,12 @@
 // Signage dashboard: a small hash-routed single page app, no build step.
 import { gzImageStream, imageStream, saveStream } from "./image.js";
 import { initParams, overrideForm, schemaForm, withOrder } from "./params.js";
+import { initPerf, perfPanel } from "./perf.js";
 
 const $main = document.getElementById("main");
 // (h and api are function declarations below, so they're hoisted.)
 initParams({ h, api });
+initPerf({ h, api });
 let info = null;
 let timer = null;
 let cleanup = null;
@@ -433,9 +435,16 @@ async function viewDevice(id) {
     } catch (e) { toast(e.message); }
   };
 
+  const perf = perfPanel(id);
+  let perfAt = Date.now();
   const refresh = async () => {
     dev = await api("GET", `/api/devices/${id}`);
     renderHead();
+    // New samples arrive every 10-15 s; redraw twice a minute, but not under the pointer.
+    if (Date.now() - perfAt > 30000 && perf.querySelector(".perf-tip")?.hidden !== false) {
+      perfAt = Date.now();
+      perf.load();
+    }
     if (lastShotCmd) {
       const c = dev.commands.find((x) => x.id === lastShotCmd);
       if (c && c.state !== "pending" && c.state !== "sent") {
@@ -520,6 +529,7 @@ async function viewDevice(id) {
         } }, "Update OS"),
         h("button", { class: "danger", onclick: () => confirm(`Reboot ${dev.name}?`) && command("reboot") }, "Reboot"))),
     termBox,
+    h("div", { class: "panel" }, h("h2", {}, "Performance, last hour"), perf),
     h("div", { class: "grid2" },
       h("div", {},
         h("div", { class: "panel" }, h("h2", {}, "Screen"), shotsBox),
