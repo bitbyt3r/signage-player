@@ -16,8 +16,23 @@ STAGE=/run/signage-install/stage
 DEFS=/run/signage-install/repart.d
 
 say() { printf '%s\n' "$*"; }
-die() { say ""; say "INSTALL FAILED: $*"; say "Power off, fix the problem, and boot the stick again."; sleep infinity; }
+TARGET= WRITING=
+die() {
+    trap - ERR EXIT
+    say ""
+    say "INSTALL FAILED: $*"
+    # Never leave a half-written disk the firmware would boot: drop its
+    # partition table (primary and backup GPT, protective MBR).
+    if [[ -n $WRITING && -b $TARGET ]]; then
+        wipefs -q -a -f "$TARGET" 2>/dev/null && say "The partial install on $TARGET was erased; it won't boot."
+    fi
+    say "Power off, fix the problem, and boot the stick again."
+    sleep infinity
+}
 trap 'die "unexpected error on line $LINENO"' ERR
+# Errors inside functions don't run the ERR trap (no set -E, which would
+# also fire inside $(...)); set -e still exits, and this catches that.
+trap 'rc=$?; [[ $rc -eq 0 ]] || die "the installer stopped unexpectedly (exit code $rc)"' EXIT
 
 clear || true
 say "=== Signage player installer ($(. /usr/lib/os-release; echo "$IMAGE_VERSION")) ==="
@@ -129,6 +144,62 @@ for ((i = COUNTDOWN; i > 0; i--)); do
 done
 say ""; say ""
 
+# Free the target disk: an old install's partitions may be mounted, used as
+# swap, or under device-mapper (LVM, dm-crypt, our own verity) or md. The
+# image has no lvm2/mdadm, so nothing assembles those on its own, but
+# anything left holding a partition makes the kernel refuse to re-read the
+# new partition table (BLKRRPART: busy) and systemd-repart fails.
+release() { # release DEVICE: unmount, swapoff and tear down what sits on it
+    local dev=$1 name h t
+    for h in /sys/class/block/"${dev##*/}"/holders/*; do
+        [[ -e $h ]] && release "/dev/${h##*/}"
+    done
+    while read -r t; do
+        [[ -n $t ]] && { umount -R "$t" 2>/dev/null || umount -l "$t"; }
+    done < <(findmnt -rno TARGET -S "$dev" | sort -r)
+    grep -q "^$dev " /proc/swaps && swapoff "$dev"
+    case ${dev##*/} in
+        dm-*) name=$(<"/sys/class/block/${dev##*/}/dm/name")
+              say "  removing device-mapper device $name"
+              dmsetup remove --retry "$name" ;;
+        md*)  say "  stopping RAID array ${dev##*/}"
+              echo inactive >"/sys/class/block/${dev##*/}/md/array_state" 2>/dev/null || true
+              echo clear >"/sys/class/block/${dev##*/}/md/array_state" ;;
+    esac
+}
+reread() { # reread DISK: get the kernel to see the partition table on disk
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        udevadm settle
+        blockdev --rereadpt "$1" 2>/dev/null && { udevadm settle; return 0; }
+        partx -u "$1" 2>/dev/null || true
+        sleep 1
+    done
+    return 1
+}
+
+# The running system mustn't come from the target. Reinstalling the same
+# version over an earlier install is the case that does it: both disks
+# carry the same /usr partition UUID and the initrd may pick the disk's.
+if lsblk -nrpo MOUNTPOINT "$TARGET" | grep -qx -E '/|/usr|/sysroot(/usr)?'; then
+    say "$TARGET holds an earlier install that this boot is using for /usr."
+    say "Erasing its partition table, then rebooting to install from the stick."
+    wipefs -q -a -f "$TARGET"
+    sync; sleep 10; systemctl reboot; sleep infinity
+fi
+
+say "Preparing $TARGET..."
+release "$TARGET"
+while read -r part; do
+    release "$part"
+done < <(lsblk -lnpo NAME,TYPE "$TARGET" | awk '$2=="part"{print $1}')
+WRITING=1
+while read -r part; do
+    wipefs -q -a "$part" || die "cannot clear $part (still in use?)"
+done < <(lsblk -lnpo NAME,TYPE "$TARGET" | awk '$2=="part"{print $1}')
+wipefs -q -a "$TARGET" || die "cannot clear $TARGET (still in use?)"
+reread "$TARGET" || die "the kernel still sees old partitions on $TARGET (something is using them)"
+
 uuid() { lsblk -no PARTUUID "$1"; }
 label() { lsblk -no PARTLABEL "$1"; }
 
@@ -136,7 +207,7 @@ rm -rf "$DEFS"; mkdir -p "$DEFS"
 cat >"$DEFS/00-esp.conf" <<CONF
 [Partition]
 Type=esp
-CopyBlocks=$SRC_ESP
+# Filled last (below), so an install cut short leaves nothing bootable.
 SizeMinBytes=512M
 SizeMaxBytes=512M
 CONF
@@ -185,13 +256,28 @@ CONF
 
 say "Writing partitions..."
 # No discard: BLKDISCARD over the whole root partition took minutes on some
-# disks. --discard=no also makes systemd-repart (257) run mkfs.ext4 with
-# "-E nodiscard,lazy_itable_init=1"; lazy_journal_init skips zeroing the
-# journal too. The kernel finishes the inode tables in the background after
-# first boot, and fstrim.timer trims free space weekly.
-SYSTEMD_REPART_MKFS_OPTIONS_EXT4="-E lazy_journal_init=1" \
-    systemd-repart --dry-run=no --empty=force --discard=no --definitions="$DEFS" "$TARGET"
-udevadm settle
+# disks. --discard=no covers repart's own discards, but repart 257 still runs
+# mkfs.ext4 (on a loop device over the partition) with discard on, so pass
+# nodiscard ourselves; mke2fs takes the last -E value. lazy_journal_init
+# skips zeroing the journal too. The kernel finishes the inode tables in the
+# background after first boot, and fstrim.timer trims free space weekly.
+if ! SYSTEMD_REPART_MKFS_OPTIONS_EXT4="-E nodiscard,lazy_itable_init=1,lazy_journal_init=1" \
+    systemd-repart --dry-run=no --empty=force --discard=no --definitions="$DEFS" "$TARGET"; then
+    # repart writes the partitions and the table before asking the kernel to
+    # re-read it, so a failed re-read alone is recoverable.
+    say "systemd-repart reported an error; checking what is on the disk..."
+    reread "$TARGET" || die "writing partitions failed and the kernel can't re-read $TARGET"
+fi
+reread "$TARGET" || die "the kernel can't re-read the new partition table on $TARGET"
+for l in root _empty "$(label "$SRC_USR")" "$(label "$SRC_VERITY")"; do
+    [[ -n $(part_of "$TARGET" "$l") ]] || die "partition $l missing on $TARGET after writing"
+done
+TGT_ESP=$(lsblk -lnpo NAME,PARTTYPE "$TARGET" | awk '$2=="c12a7328-f81f-11d2-ba4b-00a0c93ec93b"{print $1; exit}')
+[[ -b $TGT_ESP ]] || die "no ESP on $TARGET after writing"
+
+say "Copying the boot partition..."
+dd if="$SRC_ESP" of="$TGT_ESP" bs=4M conv=fsync status=none
+cmp -n "$(blockdev --getsize64 "$SRC_ESP")" "$SRC_ESP" "$TGT_ESP" >/dev/null || die "the boot partition copy doesn't match the stick"
 
 # Secure Boot: queue our certificates for MOK enrollment unless shim already
 # trusts them (for example after "Enroll key from disk" in MokManager, which
@@ -242,6 +328,7 @@ new=$(efibootmgr | sed -n 's/^Boot\([0-9A-F]\{4\}\)\*\? Signage.*/\1/p' | head -
 [[ -n $new ]] && efibootmgr -q -n "$new"
 
 sync
+WRITING=
 say ""
 WAIT=10; [[ -n $MOK_QUEUED ]] && WAIT=30
 say "Installed to $TARGET. Rebooting into it in $WAIT s."
