@@ -1,0 +1,845 @@
+#!/usr/bin/python3 -B
+"""Signage dashboard agent: enrolls with the dashboard, checks in, applies
+settings, keeps OGraf packages and content.json in sync for offline play,
+and runs commands (reboot, screenshot, terminal, OS update...).
+
+Runs as root from signage-agent.service. Standard library only.
+
+Files:
+  /var/lib/signage/config.toml        from the install stick ([dashboard] url, enroll_token)
+  /var/lib/signage/overrides.toml     dashboard settings, written here (+ .prev for rollback)
+  /var/lib/signage/content.json       what the player shows, written here
+  /var/lib/signage/packages/<id>/<v>/ unpacked OGraf packages
+  /var/lib/signage/agent/             identity and state
+"""
+
+import base64
+import hashlib
+import json
+import os
+import pty
+import pwd
+import re
+import select
+import shutil
+import signal
+import socket
+import ssl
+import struct
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import tomllib
+import urllib.error
+import urllib.parse
+import urllib.request
+import zipfile
+from pathlib import Path
+
+STATE = Path(os.environ.get("SIGNAGE_STATE", "/var/lib/signage"))
+RUN = Path(os.environ.get("SIGNAGE_RUN", "/run/signage"))
+AGENT = STATE / "agent"
+IDENTITY = AGENT / "identity.json"
+AGENT_STATE = AGENT / "state.json"
+CONFIG = STATE / "config.toml"
+OVERRIDES = STATE / "overrides.toml"
+OVERRIDES_PREV = STATE / "overrides.toml.prev"
+CONTENT = STATE / "content.json"
+PACKAGES = STATE / "packages"
+SIGNAGE_CONFIG = os.environ.get("SIGNAGE_CONFIG_BIN", "/usr/lib/signage/signage-config")
+DRY_RUN = os.environ.get("SIGNAGE_AGENT_DRY_RUN") == "1"  # tests: don't touch the system
+
+ROLLBACK_AFTER = 300
+VERSION = "1"
+
+
+def log(msg):
+    print(f"signage-agent: {msg}", file=sys.stderr, flush=True)
+
+
+# ------------------------------------------------------------------ files
+
+def write_atomic(path, data, mode=0o644):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    with open(tmp, "wb" if isinstance(data, bytes) else "w") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def read_json(path, default):
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return default
+
+
+def load_toml(path):
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+    except tomllib.TOMLDecodeError as e:
+        log(f"{path}: {e}")
+        return {}
+
+
+def merge(base, over):
+    out = dict(base)
+    for k, v in over.items():
+        if isinstance(v, dict) and isinstance(out.get(k), dict):
+            out[k] = merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+def toml_value(v):
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, str):
+        return json.dumps(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(toml_value(x) for x in v) + "]"
+    raise TypeError(type(v).__name__)
+
+
+def toml_dumps(cfg, header=""):
+    out = [header] if header else []
+    for sec, body in cfg.items():
+        if not isinstance(body, dict):
+            continue
+        scalars = {k: v for k, v in body.items() if not (isinstance(v, list) and v and isinstance(v[0], dict))}
+        out.append(f"[{sec}]")
+        out += [f"{k} = {toml_value(v)}" for k, v in scalars.items() if not isinstance(v, dict)]
+        out.append("")
+        for k, rows in body.items():
+            if k in scalars:
+                continue
+            for row in rows:
+                out.append(f"[[{sec}.{k}]]")
+                out += [f"{rk} = {toml_value(rv)}" for rk, rv in row.items()]
+                out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def run(cmd, timeout=30, **kw):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kw)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return subprocess.CompletedProcess(cmd, 127, "", str(e))
+
+
+# ------------------------------------------------------------------ system facts
+
+def primary_mac():
+    best = None
+    for dev in sorted(Path("/sys/class/net").iterdir()):
+        if not (dev / "device").exists():
+            continue
+        try:
+            mac = (dev / "address").read_text().strip()
+        except OSError:
+            continue
+        kind = 1 if (dev / "wireless").exists() else 0
+        if best is None or (kind, dev.name) < best[0]:
+            best = ((kind, dev.name), mac)
+    return best[1] if best else ""
+
+
+def os_release():
+    out = {}
+    try:
+        for line in Path("/usr/lib/os-release").read_text().splitlines():
+            if "=" in line:
+                k, v = line.split("=", 1)
+                out[k] = v.strip().strip('"')
+    except OSError:
+        pass
+    return out
+
+
+def wayland_env():
+    try:
+        pw = pwd.getpwnam("signage")
+    except KeyError:
+        return None
+    rd = Path(f"/run/user/{pw.pw_uid}")
+    socks = sorted(rd.glob("wayland-[0-9]")) if rd.exists() else []
+    if not socks:
+        return None
+    return dict(os.environ, XDG_RUNTIME_DIR=str(rd), WAYLAND_DISPLAY=socks[0].name)
+
+
+def displays():
+    env = wayland_env()
+    if not env:
+        return {"error": "no Wayland session (is the player running?)"}
+    r = run(["wlr-randr", "--json"], env=env, timeout=10)
+    if r.returncode != 0:
+        return {"error": (r.stderr or "wlr-randr failed").strip()[:300]}
+    outs = []
+    try:
+        for o in json.loads(r.stdout):
+            modes, current = [], ""
+            for m in o.get("modes", []):
+                label = f"{m['width']}x{m['height']}@{round(m.get('refresh', 0))}"
+                modes.append({"mode": label, "preferred": m.get("preferred", False)})
+                if m.get("current"):
+                    current = label
+            outs.append({"name": o.get("name"), "description": o.get("description", ""),
+                         "enabled": o.get("enabled"), "current": current if o.get("enabled") else "",
+                         "transform": o.get("transform"), "scale": o.get("scale"), "modes": modes[:40]})
+    except (ValueError, KeyError, TypeError) as e:
+        return {"error": f"couldn't read wlr-randr output: {e}"}
+    return {"outputs": outs}
+
+
+def network():
+    out = {}
+    r = run(["ip", "-j", "route", "show", "default"])
+    try:
+        routes = sorted(json.loads(r.stdout or "[]"), key=lambda x: x.get("metric", 0))
+    except ValueError:
+        routes = []
+    if routes:
+        dev = routes[0].get("dev", "")
+        out["interface"] = dev
+        out["gateway"] = routes[0].get("gateway", "")
+        if Path(f"/sys/class/net/{dev}/wireless").exists():
+            out["type"] = "wifi"
+            w = run(["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL", "device", "wifi", "list", "ifname", dev, "--rescan", "no"])
+            for line in w.stdout.splitlines():
+                parts = re.split(r"(?<!\\):", line)
+                if len(parts) >= 3 and parts[0] == "*":
+                    out["ssid"] = parts[1].replace("\\:", ":")
+                    out["signal"] = int(parts[2]) if parts[2].isdigit() else None
+        else:
+            out["type"] = "ethernet"
+    else:
+        out["type"] = "none"
+    return out
+
+
+def addresses():
+    r = run(["ip", "-j", "addr", "show", "scope", "global"])
+    out = []
+    try:
+        for link in json.loads(r.stdout or "[]"):
+            for a in link.get("addr_info", []):
+                out.append(f"{link['ifname']} {a['local']}/{a['prefixlen']}")
+    except (ValueError, KeyError):
+        pass
+    return out
+
+
+def ntp():
+    r = run(["chronyc", "-c", "-n", "tracking"])
+    f = r.stdout.strip().split(",")
+    if r.returncode != 0 or len(f) < 14:
+        return {"synced": None}
+    try:
+        return {"source": f[1], "stratum": int(f[2]), "offset": float(f[4]),
+                "last_offset": float(f[5]), "leap": f[13],
+                "synced": f[13] != "Not synchronised" and int(f[2]) < 16}
+    except ValueError:
+        return {"synced": None}
+
+
+def status(st):
+    osr = os_release()
+    try:
+        uptime = float(Path("/proc/uptime").read_text().split()[0])
+    except OSError:
+        uptime = 0
+    try:
+        vfs = os.statvfs(STATE)
+        disk = {"total": vfs.f_blocks * vfs.f_frsize, "used": (vfs.f_blocks - vfs.f_bfree) * vfs.f_frsize}
+    except OSError:
+        disk = None
+    cfg_status = read_json(RUN / "config-status.json", {})
+    base = load_toml(CONFIG)
+    base.pop("dashboard", None)
+    if isinstance(base.get("install"), dict) and base["install"].get("mok_password"):
+        base["install"]["mok_password"] = "********"
+    for w in base.get("network", {}).get("wifi", []) or []:
+        if isinstance(w, dict) and w.get("psk"):
+            w["psk"] = "********"
+    errors = [f"config: {e}" for e in cfg_status.get("errors", [])]
+    if st.get("settings_error"):
+        errors.append(f"dashboard settings rejected: {st['settings_error']}")
+    if st.get("content_error"):
+        errors.append(f"content: {st['content_error']}")
+    now = time.time()
+    if not st.get("display_cache") or now - st.get("display_at", 0) > 60:
+        st["display_cache"] = displays()
+        st["display_at"] = now
+    player = run(["systemctl", "is-active", "signage-player.service"]).stdout.strip()
+    content = read_json(CONTENT, {})
+    return {
+        "agent": VERSION,
+        "hostname": socket.gethostname(),
+        "os_version": osr.get("IMAGE_VERSION", ""),
+        "kernel": os.uname().release,
+        "uptime": uptime,
+        "addresses": addresses(),
+        "network": network(),
+        "ntp": ntp(),
+        "player": player,
+        "display": st["display_cache"],
+        "disk": disk,
+        "load": os.getloadavg()[0],
+        "content": {"rev": content.get("rev", ""), "generation": content.get("generation", 0),
+                    "error": st.get("content_error", "")},
+        "config": {"source": cfg_status.get("source", ""), "base": base,
+                   "rolled_back": st.get("rolled_back", "")},
+        "errors": errors,
+    }
+
+
+# ------------------------------------------------------------------ HTTP
+
+class Unauthorized(Exception):
+    pass
+
+
+def http_json(url, body, auth=None, timeout=20):
+    req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers={
+        "Content-Type": "application/json", "User-Agent": f"signage-agent/{VERSION}",
+        **({"Authorization": auth} if auth else {})})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise Unauthorized(e.read().decode(errors="replace")[:200])
+        raise
+
+
+def download(url, dest, sha256, size):
+    h = hashlib.sha256()
+    n = 0
+    with urllib.request.urlopen(url, timeout=60) as r, open(dest, "wb") as f:
+        while True:
+            chunk = r.read(1 << 20)
+            if not chunk:
+                break
+            h.update(chunk)
+            n += len(chunk)
+            f.write(chunk)
+    if h.hexdigest() != sha256 or (size and n != size):
+        raise ValueError(f"checksum mismatch for {url.split('?')[0]}")
+
+
+# ------------------------------------------------------------------ WebSocket client (terminal)
+
+class WebSocket:
+    """Just enough RFC 6455 for the terminal relay."""
+
+    def __init__(self, url, timeout=20):
+        u = urllib.parse.urlsplit(url)
+        secure = u.scheme == "wss"
+        port = u.port or (443 if secure else 80)
+        sock = socket.create_connection((u.hostname, port), timeout=timeout)
+        if secure:
+            sock = ssl.create_default_context().wrap_socket(sock, server_hostname=u.hostname)
+        key = base64.b64encode(os.urandom(16)).decode()
+        path = (u.path or "/") + (f"?{u.query}" if u.query else "")
+        sock.sendall((f"GET {path} HTTP/1.1\r\nHost: {u.hostname}\r\nUpgrade: websocket\r\n"
+                      f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
+                      f"User-Agent: signage-agent/{VERSION}\r\n\r\n").encode())
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            chunk = sock.recv(4096)
+            if not chunk:
+                raise ConnectionError("WebSocket handshake failed: connection closed")
+            buf += chunk
+        head, self.buf = buf.split(b"\r\n\r\n", 1)
+        status_line = head.split(b"\r\n", 1)[0].decode(errors="replace")
+        if " 101 " not in status_line:
+            raise ConnectionError(f"WebSocket handshake failed: {status_line}")
+        sock.settimeout(None)
+        self.sock = sock
+        self.lock = threading.Lock()
+        self.closed = False
+
+    def _send(self, opcode, payload):
+        header = bytearray([0x80 | opcode])
+        n = len(payload)
+        if n < 126:
+            header.append(0x80 | n)
+        elif n < 65536:
+            header += bytes([0x80 | 126]) + struct.pack("!H", n)
+        else:
+            header += bytes([0x80 | 127]) + struct.pack("!Q", n)
+        mask = os.urandom(4)
+        masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+        with self.lock:
+            self.sock.sendall(bytes(header) + mask + masked)
+
+    def send(self, text):
+        self._send(0x1, text.encode())
+
+    def _read(self, n):
+        while len(self.buf) < n:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise ConnectionError("closed")
+            self.buf += chunk
+        out, self.buf = self.buf[:n], self.buf[n:]
+        return out
+
+    def recv(self):
+        """Next text/binary message, or None when the socket closes."""
+        parts = []
+        while True:
+            b0, b1 = self._read(2)
+            opcode, n = b0 & 0x0F, b1 & 0x7F
+            if n == 126:
+                n = struct.unpack("!H", self._read(2))[0]
+            elif n == 127:
+                n = struct.unpack("!Q", self._read(8))[0]
+            mask = self._read(4) if b1 & 0x80 else None
+            data = self._read(n)
+            if mask:
+                data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+            if opcode == 0x8:
+                self.close()
+                return None
+            if opcode == 0x9:
+                self._send(0xA, data)
+                continue
+            if opcode == 0xA:
+                continue
+            parts.append(data)
+            if b0 & 0x80:
+                return b"".join(parts).decode(errors="replace")
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        try:
+            self._send(0x8, b"")
+        except OSError:
+            pass
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def terminal_session(args):
+    url = args["ws_url"] + "?" + urllib.parse.urlencode(
+        {"session": args["session"], "role": "device", "token": args["token"]})
+    ws = WebSocket(url)
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.chdir("/root" if os.path.isdir("/root") else "/")
+        env = {"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LANG": "C.UTF-8",
+               "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+        os.execve("/bin/bash", ["bash", "-l"], env)
+    done = threading.Event()
+
+    def pump_out():
+        try:
+            while not done.is_set():
+                r, _, _ = select.select([fd], [], [], 1)
+                if not r:
+                    continue
+                try:
+                    data = os.read(fd, 16384)
+                except OSError:
+                    break
+                if not data:
+                    break
+                ws.send(json.dumps({"t": "o", "d": base64.b64encode(data).decode()}))
+        except OSError:
+            pass
+        done.set()
+        ws.close()
+
+    def keepalive():
+        while not done.wait(60):
+            try:
+                ws.send('{"t":"ping"}')
+            except OSError:
+                break
+
+    threading.Thread(target=pump_out, daemon=True).start()
+    threading.Thread(target=keepalive, daemon=True).start()
+    try:
+        while not done.is_set():
+            msg = ws.recv()
+            if msg is None:
+                break
+            try:
+                m = json.loads(msg)
+            except ValueError:
+                continue
+            if m.get("t") == "i":
+                os.write(fd, m.get("d", "").encode())
+            elif m.get("t") == "r":
+                import fcntl
+                import termios
+                fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", int(m["rows"]), int(m["cols"]), 0, 0))
+            elif m.get("t") == "closed":
+                break
+    except (OSError, ConnectionError):
+        pass
+    finally:
+        done.set()
+        ws.close()
+        try:
+            os.kill(pid, signal.SIGHUP)
+            time.sleep(0.5)
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        try:
+            os.waitpid(pid, 0)
+        except ChildProcessError:
+            pass
+        os.close(fd)
+    return "terminal closed"
+
+
+# ------------------------------------------------------------------ the agent
+
+class Agent:
+    def __init__(self):
+        self.st = read_json(AGENT_STATE, {})
+        self.results = []
+        self.lock = threading.Lock()
+        self.wake = threading.Event()
+        self.reboot_requested = False
+        self.poll = 15
+        self.failures = 0
+
+    def save(self):
+        keep = {k: v for k, v in self.st.items() if k not in ("display_cache", "display_at")}
+        write_atomic(AGENT_STATE, json.dumps(keep, indent=1), 0o600)
+
+    def result(self, cid, ok, output=""):
+        with self.lock:
+            self.results.append({"id": cid, "ok": ok, "output": str(output)[-8000:]})
+        self.wake.set()
+
+    # ---- config and identity
+
+    def dashboard(self):
+        cfg = merge(load_toml(CONFIG), load_toml(OVERRIDES))
+        d = cfg.get("dashboard", {})
+        return (d.get("url") or "").rstrip("/"), d.get("enroll_token") or ""
+
+    def identity(self, url, token):
+        ident = read_json(IDENTITY, None)
+        if ident and ident.get("url") == url:
+            return ident
+        r = http_json(f"{url}/device/enroll", {
+            "enroll_token": token, "mac": primary_mac(), "hostname": socket.gethostname(),
+            "machine_id": Path("/etc/machine-id").read_text().strip() if Path("/etc/machine-id").exists() else "",
+        })
+        ident = {"url": url, "device_id": r["device_id"], "token": r["token"]}
+        write_atomic(IDENTITY, json.dumps(ident), 0o600)
+        log(f"enrolled as {ident['device_id']}")
+        return ident
+
+    # ---- settings
+
+    def apply_settings(self, settings, rev):
+        if rev == self.st.get("bad_settings_rev"):
+            return  # rolled back once already; wait for new settings
+        header = "# Written by signage-agent from the dashboard. Local edits are overwritten.\n"
+        text = toml_dumps(settings, header) if settings else ""
+        old_text = OVERRIDES.read_text() if OVERRIDES.exists() else ""
+        if text == old_text:
+            self.st["settings_rev"] = rev
+            self.st.pop("settings_error", None)
+            return
+        # Check the merged result with the device's own validator: an invalid
+        # config would make signage-config fall back to defaults (no WiFi).
+        merged = merge(load_toml(CONFIG), settings)
+        with tempfile.NamedTemporaryFile("w", suffix=".toml", dir=AGENT, delete=False) as f:
+            f.write(toml_dumps(merged))
+            tmp = f.name
+        try:
+            chk = run([SIGNAGE_CONFIG, "--check", tmp])
+        finally:
+            os.unlink(tmp)
+        if chk.returncode != 0:
+            self.st["settings_error"] = " ".join(chk.stdout.split())[:500] or chk.stderr.strip()[:500]
+            log(f"rejected dashboard settings rev {rev}: {self.st['settings_error']}")
+            return
+        old = load_toml(OVERRIDES)
+        if old_text:
+            write_atomic(OVERRIDES_PREV, old_text, 0o600)
+        else:
+            OVERRIDES_PREV.unlink(missing_ok=True)
+        if text:
+            write_atomic(OVERRIDES, text, 0o600)
+        else:
+            OVERRIDES.unlink(missing_ok=True)
+        net_changed = old.get("network") != settings.get("network") or old.get("ntp") != settings.get("ntp")
+        disp_changed = old.get("display") != settings.get("display")
+        log(f"applying dashboard settings rev {rev}")
+        if not DRY_RUN:
+            r = run([SIGNAGE_CONFIG, "--reload"], timeout=60)
+            if r.returncode != 0:
+                log(f"signage-config --reload failed: {r.stderr.strip()[:300]}")
+            if disp_changed:
+                run(["systemctl", "restart", "signage-player.service"])
+        self.st["settings_rev"] = rev
+        self.st.pop("settings_error", None)
+        self.st.pop("rolled_back", None)
+        self.st["display_at"] = 0
+        if net_changed:
+            self.st["rollback"] = {"deadline": time.time() + ROLLBACK_AFTER, "rev": rev,
+                                   "prev_rev": self.st.get("prev_settings_rev", 0)}
+        self.st["prev_settings_rev"] = rev
+        self.save()
+
+    def maybe_roll_back(self):
+        rb = self.st.get("rollback")
+        if not rb or time.time() < rb["deadline"]:
+            return
+        log("no contact with the dashboard since the network change; rolling back")
+        if OVERRIDES_PREV.exists():
+            os.replace(OVERRIDES_PREV, OVERRIDES)
+        else:
+            OVERRIDES.unlink(missing_ok=True)
+        if not DRY_RUN:
+            run([SIGNAGE_CONFIG, "--reload"], timeout=60)
+        self.st["bad_settings_rev"] = rb["rev"]
+        self.st["settings_rev"] = rb["prev_rev"]
+        self.st["prev_settings_rev"] = rb["prev_rev"]
+        self.st["rolled_back"] = f"settings rev {rb['rev']} cut the device off, restored the previous ones"
+        self.st.pop("rollback", None)
+        self.save()
+
+    # ---- content
+
+    def sync_content(self, content):
+        PACKAGES.mkdir(parents=True, exist_ok=True)
+        try:
+            for p in content.get("packages", []):
+                dest = PACKAGES / p["id"] / p["version"]
+                marker = dest / ".signage-sha256"
+                if marker.exists() and marker.read_text().strip() == p["sha256"]:
+                    continue
+                self.install_package(p, dest)
+        except Exception as e:
+            self.st["content_error"] = f"package download failed: {e}"
+            log(self.st["content_error"])
+            return False
+        out = {k: v for k, v in content.items() if k != "packages"}
+        out["packages"] = [{k: v for k, v in p.items() if k != "url"} for p in content.get("packages", [])]
+        for layer in out.get("layers", []):
+            for it in layer.get("items", []):
+                it["path"] = str(PACKAGES / it["package"] / it["version"])
+                it["url"] = f"/packages/{urllib.parse.quote(it['package'])}/{urllib.parse.quote(it['version'])}/"
+        out["generation"] = int(read_json(CONTENT, {}).get("generation", 0)) + 1
+        out["written"] = time.time()
+        write_atomic(CONTENT, json.dumps(out, indent=1))
+        self.st.pop("content_error", None)
+        self.prune(content)
+        log(f"content rev {content.get('rev')} ready (generation {out['generation']})")
+        return True
+
+    def install_package(self, p, dest):
+        log(f"downloading {p['id']} {p['version']}")
+        tmpdir = Path(tempfile.mkdtemp(dir=PACKAGES, prefix=".dl-"))
+        try:
+            zpath = tmpdir / "pkg.zip"
+            download(p["url"], zpath, p["sha256"], p.get("size"))
+            root = p.get("root", "")
+            out = tmpdir / "out"
+            out.mkdir()
+            with zipfile.ZipFile(zpath) as z:
+                for info in z.infolist():
+                    name = info.filename
+                    if root:
+                        if not name.startswith(root):
+                            continue
+                        name = name[len(root):]
+                    if not name or name.endswith("/"):
+                        continue
+                    target = (out / name).resolve()
+                    if out.resolve() not in target.parents:
+                        raise ValueError(f"unsafe path {info.filename}")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with z.open(info) as src, open(target, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+            (out / ".signage-sha256").write_text(p["sha256"] + "\n")
+            for f in [out, *out.rglob("*")]:
+                os.chmod(f, 0o755 if f.is_dir() else 0o644)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists():
+                shutil.rmtree(dest)
+            os.replace(out, dest)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def prune(self, content):
+        keep = {(p["id"], p["version"]) for p in content.get("packages", [])}
+        for pkg in PACKAGES.iterdir():
+            if pkg.name.startswith(".") or not pkg.is_dir():
+                if pkg.name.startswith(".dl-"):
+                    shutil.rmtree(pkg, ignore_errors=True)
+                continue
+            for ver in pkg.iterdir():
+                if (pkg.name, ver.name) not in keep:
+                    shutil.rmtree(ver, ignore_errors=True)
+            if not any(pkg.iterdir()):
+                pkg.rmdir()
+
+    # ---- commands
+
+    def command(self, cmd):
+        cid, ctype, args = cmd["id"], cmd["type"], cmd.get("args") or {}
+        log(f"command {ctype} ({cid})")
+        if ctype in ("terminal", "os-update"):
+            threading.Thread(target=self._threaded, args=(cid, ctype, args), daemon=True).start()
+            return
+        try:
+            if ctype == "reboot":
+                self.result(cid, True, "rebooting")
+                self.reboot_requested = True
+            elif ctype == "restart-player":
+                r = run(["systemctl", "restart", "signage-player.service"])
+                self.result(cid, r.returncode == 0, r.stderr)
+            elif ctype == "screenshot":
+                self.result(cid, *self.screenshot(args))
+            elif ctype == "resync":
+                self.st["content_rev"] = ""
+                self.st["force_verify"] = True
+                self.result(cid, True, "content will be fetched again")
+            else:
+                self.result(cid, False, f"unknown command {ctype}")
+        except Exception as e:
+            self.result(cid, False, f"{type(e).__name__}: {e}")
+
+    def _threaded(self, cid, ctype, args):
+        try:
+            if ctype == "terminal":
+                self.result(cid, True, terminal_session(args))
+            elif ctype == "os-update":
+                cmd = ["systemd-sysupdate", "update"] + ([args["version"]] if args.get("version") else [])
+                r = run(cmd, timeout=3600)
+                out = (r.stdout + r.stderr)[-6000:]
+                if r.returncode != 0:
+                    self.result(cid, False, out)
+                    return
+                if "No update needed" in out or not out.strip():
+                    self.result(cid, True, out or "already up to date")
+                    return
+                self.result(cid, True, out + "\nrebooting into the new version")
+                self.reboot_requested = True
+        except Exception as e:
+            self.result(cid, False, f"{type(e).__name__}: {e}")
+
+    def screenshot(self, args):
+        env = wayland_env()
+        if not env:
+            return False, "no Wayland session (is the player running?)"
+        r = subprocess.run(["grim", "-t", "png", "-"], env=env, capture_output=True, timeout=20)
+        if r.returncode != 0:
+            return False, r.stderr.decode(errors="replace")[:500]
+        req = urllib.request.Request(args["upload_url"], data=r.stdout, method="PUT",
+                                     headers={"Content-Type": "image/png"})
+        with urllib.request.urlopen(req, timeout=60):
+            pass
+        return True, f"{len(r.stdout)} bytes"
+
+    # ---- main loop
+
+    def checkin(self, url, ident):
+        with self.lock:
+            results, self.results = self.results, []
+        body = {
+            "time": time.time(),
+            "status": status(self.st),
+            "settings_rev": self.st.get("settings_rev", 0),
+            "content_rev": self.st.get("content_rev") or read_json(CONTENT, {}).get("rev", ""),
+            "results": results,
+        }
+        if self.st.get("force_verify"):
+            body["content_rev"] = ""
+        try:
+            return http_json(f"{url}/device/checkin", body,
+                             auth=f"Device {ident['device_id']}:{ident['token']}")
+        except Exception:
+            with self.lock:
+                self.results = results + self.results  # report them next time
+            raise
+
+    def handle(self, resp):
+        self.poll = max(2, min(300, int(resp.get("poll_interval", 15))))
+        if self.st.pop("rollback", None):
+            log("dashboard reachable after the network change; keeping it")
+        if "settings" in resp:
+            self.apply_settings(resp["settings"] or {}, int(resp.get("settings_rev", 0)))
+        if "content" in resp:
+            if self.st.pop("force_verify", False):
+                for marker in PACKAGES.glob("*/*/.signage-sha256"):
+                    marker.unlink()
+            if self.sync_content(resp["content"]):
+                self.st["content_rev"] = resp["content"].get("rev", "")
+        for cmd in resp.get("commands", []):
+            self.command(cmd)
+        self.save()
+
+    def loop(self):
+        AGENT.mkdir(parents=True, exist_ok=True)
+        os.chmod(AGENT, 0o700)
+        while True:
+            url, token = self.dashboard()
+            if not url:
+                time.sleep(60)
+                continue
+            try:
+                ident = self.identity(url, token)
+                resp = self.checkin(url, ident)
+                self.failures = 0
+                self.handle(resp)
+            except Unauthorized as e:
+                log(f"dashboard refused our credentials ({e}); enrolling again")
+                IDENTITY.unlink(missing_ok=True)
+                self.failures += 1
+            except Exception as e:
+                self.failures += 1
+                if self.failures in (1, 5) or self.failures % 60 == 0:
+                    log(f"check-in failed ({type(e).__name__}: {e}); playing from cache")
+                self.maybe_roll_back()
+            if self.reboot_requested:
+                with self.lock:
+                    pending = bool(self.results)
+                if not pending or self.failures:
+                    log("rebooting")
+                    if not DRY_RUN:
+                        run(["systemctl", "reboot"])
+                    return
+                continue  # report the result first, then reboot
+            delay = self.poll if not self.failures else min(60, 5 * self.failures)
+            self.wake.wait(delay)
+            self.wake.clear()
+
+
+def main():
+    if os.geteuid() != 0 and not DRY_RUN:
+        log("must run as root")
+        return 1
+    Agent().loop()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

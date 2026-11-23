@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signage Dashboard</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js" defer></script>
+<script type="module" src="/static/app.js"></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/devices">Signage</a>
+  <nav id="nav">
+    <a href="#/devices">Devices</a>
+    <a href="#/programs">Programs</a>
+    <a href="#/packages">Packages</a>
+    <a href="#/images">Install images</a>
+  </nav>
+  <button id="logout" class="ghost small" hidden>Log out</button>
+</header>
+<main id="main"></main>
+<div id="toast" role="status"></div>
+</body>
+</html>

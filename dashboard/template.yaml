@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Signage player dashboard (HTTP API + WebSocket terminal relay + DynamoDB + S3)
+
+Parameters:
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 12
+    Description: Password for the dashboard web UI (at least 12 characters).
+  EnrollToken:
+    Type: String
+    NoEcho: true
+    MinLength: 16
+    Description: Shared secret players use to enroll. It goes into config.toml on install sticks.
+  GitHubRepo:
+    Type: String
+    Default: ""
+    Description: owner/repo whose releases hold install images, e.g. bitbyt3r/signage-player. Blank disables image export.
+  GitHubToken:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Fine-grained GitHub token with read access to Contents of GitHubRepo (needed for a private repo).
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures: [arm64]
+    CodeUri: src/
+    MemorySize: 512
+    Environment:
+      Variables:
+        TABLE: !Ref Table
+        BUCKET: !Ref Bucket
+
+Resources:
+  Table:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: pk, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+        - { AttributeName: kind, AttributeType: S }
+      KeySchema:
+        - { AttributeName: pk, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      GlobalSecondaryIndexes:
+        - IndexName: kind-index
+          KeySchema:
+            - { AttributeName: kind, KeyType: HASH }
+            - { AttributeName: pk, KeyType: RANGE }
+          Projection: { ProjectionType: ALL }
+      TimeToLiveSpecification: { AttributeName: ttl, Enabled: true }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      # The browser uploads packages and reads install images with presigned URLs.
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [GET, PUT, HEAD]
+            AllowedOrigins: ["*"]
+            AllowedHeaders: ["*"]
+            ExposedHeaders: [Content-Length, Content-Range, ETag]
+            MaxAge: 3600
+      LifecycleConfiguration:
+        Rules:
+          - { Id: screenshots, Status: Enabled, Prefix: screenshots/, ExpirationInDays: 14 }
+          - { Id: uploads, Status: Enabled, Prefix: uploads/, ExpirationInDays: 1 }
+          - Id: incomplete-multipart
+            Status: Enabled
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      Timeout: 29
+      Environment:
+        Variables:
+          ADMIN_PASSWORD: !Ref AdminPassword
+          ENROLL_TOKEN: !Ref EnrollToken
+          GITHUB_REPO: !Ref GitHubRepo
+          GITHUB_TOKEN: !Ref GitHubToken
+          WS_URL: !Sub wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+          MIRROR_FUNCTION: !Ref MirrorFunction
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref Table }
+        - S3CrudPolicy: { BucketName: !Ref Bucket }
+        - LambdaInvokePolicy: { FunctionName: !Ref MirrorFunction }
+      Events:
+        Http:
+          Type: HttpApi  # $default route: every path goes to this function
+
+  MirrorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: mirror.handler
+      Timeout: 900
+      MemorySize: 1024
+      EphemeralStorage: { Size: 512 }
+      Environment:
+        Variables:
+          GITHUB_REPO: !Ref GitHubRepo
+          GITHUB_TOKEN: !Ref GitHubToken
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref Table }
+        - S3CrudPolicy: { BucketName: !Ref Bucket }
+    # Async invocations: don't retry a failed multi-minute copy automatically.
+  MirrorInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Properties:
+      FunctionName: !Ref MirrorFunction
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 0
+
+  # ---------------------------------------------------------- terminal relay
+
+  WsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: ws.handler
+      Timeout: 10
+      MemorySize: 256
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref Table }
+        - Statement:
+            - Effect: Allow
+              Action: execute-api:ManageConnections
+              Resource: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WsApi}/*
+
+  WsApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-terminal
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: $request.body.action
+
+  WsIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WsApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WsFunction.Arn}/invocations
+
+  WsConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WsApi
+      RouteKey: $connect
+      Target: !Sub integrations/${WsIntegration}
+
+  WsDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WsApi
+      RouteKey: $disconnect
+      Target: !Sub integrations/${WsIntegration}
+
+  WsDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WsApi
+      RouteKey: $default
+      Target: !Sub integrations/${WsIntegration}
+
+  WsStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WsApi
+      StageName: prod
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 500
+        ThrottlingRateLimit: 200
+
+  WsPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WsFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WsApi}/*
+
+Outputs:
+  DashboardUrl:
+    Description: Open this in a browser; it is also the [dashboard] url for config.toml.
+    Value: !Sub https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com
+  TerminalUrl:
+    Description: WebSocket endpoint for browser terminals (used automatically).
+    Value: !Sub wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/prod
+  BucketName:
+    Value: !Ref Bucket

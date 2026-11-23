@@ -1,0 +1,19 @@
+[Unit]
+Description=Signage dashboard agent (check-in, settings, content sync, remote commands)
+Documentation=file:///usr/share/doc/signage/dashboard.md
+After=signage-config.service network-online.target
+Wants=network-online.target
+ConditionPathExists=!/run/signage/installer
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/signage/signage-agent
+Restart=always
+RestartSec=10
+# Players can be offline for days; the agent keeps retrying on its own and
+# never blocks boot.
+TimeoutStartSec=0
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+[Install]
+WantedBy=multi-user.target
