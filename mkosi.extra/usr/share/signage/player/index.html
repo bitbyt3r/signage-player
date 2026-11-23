@@ -18,8 +18,12 @@
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; cursor: none; background: #000; }
   body { font-family: "DejaVu Sans", sans-serif; color: #e8eef2; }
-  .layers { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; z-index: 0; }
-  .layers > .layer { position: absolute; inset: 0; background: transparent; overflow: hidden; }
+  /* overflow: clip, not hidden: hidden makes each box a scroll frame, and
+     Firefox only runs a transform animation on the compositor when the
+     moving element is at most ~1.125x its nearest scroll frame. With clip
+     that's the viewport, as it would be without the player's boxes. */
+  .layers { position: absolute; left: 0; top: 0; width: 100%; height: 100%; overflow: clip; z-index: 0; }
+  .layers > .layer { position: absolute; inset: 0; background: transparent; overflow: clip; }
   .layers > .layer > * { position: absolute; inset: 0; }
 
   /* Sliced layouts (display.mjs): the canvas (#layers) is fixed-size at the
@@ -28,7 +32,7 @@
   #output { position: absolute; left: 0; top: 0; z-index: 1; }
   #output > div { position: absolute; }
   #output .mask { background: #000; z-index: 1; }
-  #output .view { overflow: hidden; z-index: 2; }
+  #output .view { overflow: clip; z-index: 2; }
   /* ?view=canvas: canvas areas no LED shows. */
   #stage .hatch { position: absolute; z-index: 999999; pointer-events: none;
                   background: repeating-linear-gradient(45deg, #2a2a2a 0 24px, #1a1a1a 24px 48px); }
