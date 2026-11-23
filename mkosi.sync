@@ -1,0 +1,8 @@
+#!/bin/bash
+# Runs before the build. Packs initrd/signage-boot-disk into a .deb in
+# mkosi.debs/ (PackageDirectories=), so InitrdPackages= can put it into
+# mkosi's default initrd, which has no extra-tree option of its own.
+set -euo pipefail
+cd "$SRCDIR"
+rm -f mkosi.debs/signage-boot-disk_*.deb
+dpkg-deb --root-owner-group -Zgzip --build initrd/signage-boot-disk mkosi.debs/signage-boot-disk_1_all.deb >/dev/null

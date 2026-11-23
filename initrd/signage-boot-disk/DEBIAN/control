@@ -1,0 +1,12 @@
+Package: signage-boot-disk
+Version: 1
+Architecture: all
+Section: admin
+Priority: optional
+Maintainer: Signage player <noreply@example.invalid>
+Depends: bash, util-linux, udev
+Description: Find /usr on the disk the firmware booted (initrd only)
+ The install stick and an installed disk carry the same /usr and verity
+ partition UUIDs. This udev rule hides the by-partuuid links of /usr and
+ verity partitions on every other disk in the initrd, so usrhash= always
+ resolves to the boot disk.

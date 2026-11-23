@@ -38,7 +38,7 @@ if [[ $(uname) == Darwin ]]; then
     # mkosi 25.3's default tools tree asks for grub-pc-bin, which doesn't
     # exist on arm64, so use the machine's own tools instead.
     TOOLS="mkosi apt dpkg debian-archive-keyring erofs-utils mtools dosfstools e2fsprogs"
-    TOOLS+=" systemd-repart systemd-ukify python3-pefile cryptsetup-bin zstd openssl sbsigntool"
+    TOOLS+=" systemd-repart systemd-ukify python3-pefile cryptsetup-bin zstd openssl sbsigntool reprepro"
     orb -m "$M" -u root bash -c "dpkg -s $TOOLS >/dev/null 2>&1 || { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y $TOOLS; }"
     ARGS=(--tools-tree= "${ARGS[@]}")
     orb -m "$M" -u root mkdir -p /var/tmp/mkosi-ws /var/cache/mkosi

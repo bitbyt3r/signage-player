@@ -1,0 +1,23 @@
+# Installed into the initrd only (InitrdPackages= in mkosi.conf).
+#
+# The install stick and a disk installed from it carry identical /usr and
+# verity partitions with the same partition UUIDs, and usrhash= finds them
+# by /dev/disk/by-partuuid/. With both attached, whichever udev links last
+# wins: the installed system could run from the stick (and die when it is
+# pulled), or the stick's installer from the disk it is about to erase.
+# Drop those links for /usr and verity partitions that aren't on the disk
+# the firmware booted from (LoaderDevicePartUUID, set by systemd-boot).
+# Removing the link rather than lowering its priority avoids a race:
+# systemd-veritysetup starts as soon as the first link appears.
+
+ACTION=="remove", GOTO="signage_boot_disk_end"
+SUBSYSTEM!="block", GOTO="signage_boot_disk_end"
+ENV{DEVTYPE}!="partition", GOTO="signage_boot_disk_end"
+# x86-64 usr and usr-verity partition types
+ENV{ID_PART_ENTRY_TYPE}!="8484680c-9521-48c6-9c11-b0720656f69e|77ff5f63-e7b6-4633-acf4-1565b864c0e6", GOTO="signage_boot_disk_end"
+
+IMPORT{program}="/usr/lib/udev/signage-boot-disk %k"
+ENV{SIGNAGE_BOOT_DISK}=="0", SYMLINK-="disk/by-partuuid/$env{ID_PART_ENTRY_UUID}"
+ENV{SIGNAGE_BOOT_DISK}=="0", ENV{ID_FS_UUID_ENC}=="?*", SYMLINK-="disk/by-uuid/$env{ID_FS_UUID_ENC}"
+
+LABEL="signage_boot_disk_end"

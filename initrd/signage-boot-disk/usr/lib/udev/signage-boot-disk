@@ -1,0 +1,22 @@
+#!/bin/bash
+# signage-boot-disk PARTITION (kernel name, e.g. sda2): prints
+# SIGNAGE_BOOT_DISK=1 if the partition is on the disk holding the ESP the
+# firmware booted (LoaderDevicePartUUID), SIGNAGE_BOOT_DISK=0 if not, and
+# nothing when that can't be told (no systemd-boot variable), which leaves
+# the links alone.
+set -u
+var=/sys/firmware/efi/efivars/LoaderDevicePartUUID-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f
+[[ -r $var ]] || exit 0
+# 4 bytes of attributes, then UTF-16; efivarfs can't seek, so read it whole.
+loader=$(cat "$var" | tail -c +5 | tr -d '\0' | tr 'A-F' 'a-f')
+[[ -n $loader ]] || exit 0
+disk=$(basename "$(readlink -f "/sys/class/block/$1/..")")
+for p in /sys/class/block/"$disk"/"$disk"*; do
+    [[ -e $p/partition ]] || continue
+    u=$(blkid -p -o value -s PART_ENTRY_UUID "/dev/${p##*/}" 2>/dev/null)
+    if [[ ${u,,} == "$loader" ]]; then
+        echo SIGNAGE_BOOT_DISK=1
+        exit 0
+    fi
+done
+echo SIGNAGE_BOOT_DISK=0
