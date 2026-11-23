@@ -116,3 +116,13 @@ h3.small-h { font-size: 13px; margin: 12px 0 6px; color: var(--muted); font-weig
 .color-field input[type=color].unset { opacity: .3; }
 .color-field input:not([type=color]) { min-width: 0; flex: 1; }
 .param input[type=checkbox] { justify-self: start; width: auto; }
+textarea.md-edit { min-height: 220px; font-size: 13px; }
+.md-preview { border: 1px solid var(--line); border-radius: 6px; padding: 4px 14px; min-height: 120px; background: var(--bg); }
+.md-preview mark { background: #f5d76e; color: #000; }
+.md-field .row { margin-top: 4px; }
+.obj-item { display: flex; gap: 8px; align-items: flex-start; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px 0; margin-bottom: 6px; }
+.obj-item .obj-row { flex: 1; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+.obj-item .param small { display: none; }
+.obj-item > button { margin-top: 20px; }
+.color-field { display: flex; width: 100%; }
+.color-field input:not([type=color]) { width: auto; min-width: 0; flex: 1 1 0; }

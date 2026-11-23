@@ -460,7 +460,7 @@ async function viewDevice(id) {
       if (!it.package || used.some((u) => u.id === it.package)) continue;
       const pkg = byId[it.package];
       const ver = pkg?.versions.find((v) => v.version === (it.version || pkg.active_version));
-      if (ver?.schema?.properties) used.push({ id: it.package, name: pkg.name || it.package, schema: withOrder(ver.schema, ver.schema_order), base: it.data || {} });
+      if (ver?.schema?.properties) used.push({ id: it.package, name: pkg.name || it.package, schema: withOrder(ver.schema, ver.schema_order, ver.schema_json), base: it.data || {} });
     }
     if (!used.length) {
       paramsBox.replaceChildren(h("p", { class: "muted small" }, "None of this program's graphics have parameters."));
@@ -638,7 +638,7 @@ async function viewProgram(id) {
     const verSchema = () => {
       const pkg = pkgById[pkgSel.value];
       const v = pkg?.versions.find((x) => x.version === (verSel.value || pkg.active_version));
-      return v?.schema ? withOrder(v.schema, v.schema_order) : null;
+      return v?.schema ? withOrder(v.schema, v.schema_order, v.schema_json) : null;
     };
     let form = null;
     let asJson = false;

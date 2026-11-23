@@ -115,11 +115,71 @@ export function picker({ values = [], multiple = true, options = null, placehold
   return box;
 }
 
+// ---------------------------------------------------------------- markdown preview
+
+const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const inline = (t) => esc(t)
+  .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+  .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
+  .replace(/==(.+?)==/g, "<mark>$1</mark>")
+  .replace(/~~(.+?)~~/g, "<del>$1</del>")
+  .replace(/`([^`]+)`/g, "<code>$1</code>");
+
+// A rough preview only; the graphic does the real rendering.
+export function markdown(src) {
+  const out = [];
+  let list = null, para = [];
+  const flush = () => {
+    if (para.length) out.push(`<p>${para.map(inline).join("<br>")}</p>`);
+    para = [];
+    if (list) out.push(`<${list.tag}>${list.items.map((i) => `<li>${inline(i)}</li>`).join("")}</${list.tag}>`);
+    list = null;
+  };
+  for (const line of String(src).split("\n")) {
+    let m;
+    if (!line.trim()) flush();
+    else if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flush(); out.push("<hr>"); }
+    else if ((m = line.match(/^(#{1,4})\s+(.*)/))) { flush(); out.push(`<h${m[1].length + 2}>${inline(m[2])}</h${m[1].length + 2}>`); }
+    else if ((m = line.match(/^\s*[-*]\s+(.*)/)) || (m = line.match(/^\s*\d+[.)]\s+(.*)/))) {
+      const tag = /^\s*\d/.test(line) ? "ol" : "ul";
+      if (para.length || (list && list.tag !== tag)) flush();
+      list = list || { tag, items: [] };
+      list.items.push(m[1]);
+    } else if ((m = line.match(/^>\s?(.*)/))) { flush(); out.push(`<blockquote>${inline(m[1])}</blockquote>`); }
+    else { if (list) flush(); para.push(line.trim()); }
+  }
+  flush();
+  return out.join("");
+}
+
+// ---------------------------------------------------------------- lists of objects
+
+function objectList(key, s, value) {
+  if (typeof value === "string") { try { value = JSON.parse(value); } catch { value = []; } }
+  const props = s.items.properties;
+  const rows = h("div", { class: "obj-rows" });
+  const forms = [];
+  const addRow = (v = {}) => {
+    const f = schemaForm({ properties: props }, v);
+    f.classList.add("obj-row");
+    const row = h("div", { class: "obj-item" }, f,
+      h("button", { type: "button", class: "small ghost danger", onclick: () => { forms.splice(forms.indexOf(f), 1); row.remove(); } }, "Remove"));
+    forms.push(f);
+    rows.append(row);
+  };
+  (Array.isArray(value) ? value : []).forEach((v) => addRow(v || {}));
+  const box = h("div", { class: "obj-list" }, rows,
+    h("button", { type: "button", class: "small", onclick: () => addRow({}) }, `Add ${(s.items.title || (s.title || "row").replace(/s$/, "")).toLowerCase()}`));
+  box.getValue = () => forms.map((f) => f.getValue());
+  return box;
+}
+
 // ---------------------------------------------------------------- fields
 
 // Properties in the manifest's order (the dashboard stores schemas as sorted
 // JSON, so the package version carries the original order separately).
-export function withOrder(schema, order) {
+export function withOrder(schema, order, json) {
+  if (json) { try { return JSON.parse(json); } catch { /* fall through */ } }
   if (!schema?.properties || !order?.length) return schema;
   const props = {};
   for (const k of order) if (k in schema.properties) props[k] = schema.properties[k];
@@ -159,6 +219,24 @@ function fieldInput(key, s, value, values) {
     if (spec) el.load = () => loadOptions(spec, values);
     return el;
   }
+  if (s.type === "string" && s.contentMediaType === "text/markdown") {
+    const ta = h("textarea", { class: "mono md-edit" });
+    ta.value = value ?? "";
+    const prev = h("div", { class: "md-preview", hidden: true });
+    const btn = h("button", { type: "button", class: "small ghost", onclick: () => {
+      const on = prev.hidden;
+      if (on) prev.innerHTML = markdown(ta.value);
+      prev.hidden = !on;
+      ta.hidden = on;
+      btn.textContent = on ? "Edit" : "Preview";
+    } }, "Preview");
+    const wrap = h("div", { class: "md-field" }, ta, prev, h("div", { class: "row" }, btn));
+    wrap.getValue = () => ta.value;
+    return wrap;
+  }
+  if (s.type === "array" && s.items?.type === "object" && s.items.properties) {
+    return objectList(key, s, value);
+  }
   if (s.type === "string") {
     const color = s.format === "color" || s.gddType === "color-rrggbb";
     const long = s.gddType === "multi-line" || s.format === "textarea" || (s.maxLength || 0) > 200;
@@ -192,7 +270,7 @@ function fieldInput(key, s, value, values) {
 }
 
 function fieldRow(key, s, input, extra) {
-  const wide = input.classList?.contains("picker") || input.tagName === "TEXTAREA" || (s.type === "object");
+  const wide = input.classList?.contains("picker") || input.classList?.contains("md-field") || input.classList?.contains("obj-list") || input.tagName === "TEXTAREA" || (s.type === "object");
   return h("div", { class: "param" + (wide ? " wide" : ""), "data-key": key },
     h("label", { class: "field" },
       h("span", {}, s.title || key, extra || ""),

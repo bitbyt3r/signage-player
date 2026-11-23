@@ -659,6 +659,8 @@ def package_import(req):
            "name": manifest.get("name", ""), "description": manifest.get("description", ""),
            "schema": manifest.get("schema") if isinstance(manifest.get("schema"), dict) else None,
            # Items are stored as sorted JSON, so keep the manifest's parameter order for forms.
+           # The schema as written (a string, so nested property order survives too).
+           "schema_json": json.dumps(manifest["schema"]) if isinstance(manifest.get("schema"), dict) else "",
            "schema_order": list((manifest.get("schema") or {}).get("properties") or {})
            if isinstance(manifest.get("schema"), dict) and isinstance(manifest["schema"].get("properties"), dict) else [],
            "manifest": manifest}
