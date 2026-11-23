@@ -88,6 +88,29 @@ function clockText(d) {
     ntp.synced === false ? h("span", { class: "warn" }, " (NTP not synced)") : "");
 }
 
+const UPDATE_ACTIVE = ["checking", "downloading", "installing", "rebooting"];
+
+// The OS update shown for a device: in progress, or finished within the hour.
+function updateInfo(dev) {
+  const u = dev.summary?.update;
+  if (!u || !u.state) return null;
+  if (!UPDATE_ACTIVE.includes(u.state) && Date.now() - (u.updated || 0) > 3600e3) return null;
+  return u;
+}
+
+function updateBar(u) {
+  const label = { checking: "Checking", downloading: "Downloading", installing: "Installing", rebooting: "Rebooting",
+    done: "Updated", failed: "Update failed" }[u.state] || u.state;
+  return h("div", {},
+    h("div", { class: "row spread small" },
+      h("span", { class: u.state === "failed" ? "bad" : u.state === "done" ? "ok" : "" },
+        `${label}${u.version ? ` ${u.version}` : ""}`),
+      UPDATE_ACTIVE.includes(u.state) ? h("span", { class: "muted" }, `${u.percent ?? 0}%`) : ""),
+    UPDATE_ACTIVE.includes(u.state) ? h("div", { class: "progress", style: "margin:4px 0" },
+      h("div", { style: `width:${u.percent ?? 0}%` })) : "",
+    u.message ? h("div", { class: "muted small mono", style: "overflow-wrap:anywhere" }, u.message) : "");
+}
+
 const TIMEZONES = (Intl.supportedValuesOf && Intl.supportedValuesOf("timeZone")) || ["America/New_York", "UTC"];
 const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -165,7 +188,12 @@ async function viewDevices() {
           dev.summary.errors?.length ? h("span", { class: "bad small", title: dev.summary.errors.join("\n") }, " ⚠") : ""),
         h("td", {}, programs[dev.program_id]?.name || h("span", { class: "muted" }, "none")),
         h("td", { class: "mono", title: dev.ip ? `public address ${dev.ip}` : "" }, (dev.summary.addresses?.[0] || "").replace(/^\S+ /, "").replace(/\/\d+$/, "") || dev.ip || "", net.type ? h("div", { class: "muted small" }, net.type === "wifi" ? `WiFi ${net.ssid || ""} ${net.signal ? net.signal + "%" : ""}` : net.type) : ""),
-        h("td", { class: "mono" }, dev.os_version || "?"),
+        h("td", { class: "mono" }, dev.os_version || "?", (() => {
+          const u = updateInfo(dev);
+          if (!u) return "";
+          const cls = u.state === "failed" ? "bad small" : u.state === "done" ? "ok small" : "small";
+          return h("div", { class: cls }, UPDATE_ACTIVE.includes(u.state) ? `updating ${u.percent ?? 0}%` : u.state === "done" ? "updated" : "update failed");
+        })()),
         h("td", {}, clockText(dev)),
         h("td", { title: new Date(dev.last_seen * 1000).toLocaleString() }, ago(dev.last_seen)));
     }));
@@ -301,6 +329,7 @@ function statusPanel(dev) {
     h("dt", {}, "Status"), h("dd", {}, h("span", { class: `dot ${dev.online ? "on" : "off"}` }), dev.online ? "online" : "offline", ` · checked in ${ago(dev.last_seen)}`),
     h("dt", {}, "Hostname"), h("dd", { class: "mono" }, dev.hostname),
     h("dt", {}, "OS version"), h("dd", { class: "mono" }, dev.os_version || "?"),
+    updateInfo(dev) ? [h("dt", {}, "OS update"), h("dd", {}, updateBar(updateInfo(dev)))] : null,
     h("dt", {}, "Uptime"), h("dd", {}, duration(sum.uptime)),
     h("dt", {}, "Network"), h("dd", {}, net.type === "wifi" ? `WiFi "${net.ssid || "?"}" ${net.signal ?? "?"}%` : net.type || "?", net.interface ? h("span", { class: "muted" }, ` (${net.interface})`) : ""),
     h("dt", {}, "Addresses"), h("dd", { class: "mono" }, (sum.addresses || []).join(", ") || "none", dev.ip ? h("div", { class: "muted" }, `public ${dev.ip}`) : ""),

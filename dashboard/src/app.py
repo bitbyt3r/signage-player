@@ -207,6 +207,7 @@ def device_view(item, full=False):
             "uptime": status.get("uptime", 0),
             "content": status.get("content", {}),
             "errors": status.get("errors", []),
+            "update": status.get("update"),
         },
     }
     if full:

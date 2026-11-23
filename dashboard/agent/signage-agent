@@ -52,6 +52,9 @@ SIGNAGE_CONFIG = os.environ.get("SIGNAGE_CONFIG_BIN", "/usr/lib/signage/signage-
 DRY_RUN = os.environ.get("SIGNAGE_AGENT_DRY_RUN") == "1"  # tests: don't touch the system
 
 ROLLBACK_AFTER = 300
+# Debian ships it outside PATH.
+SYSUPDATE = os.environ.get("SIGNAGE_SYSUPDATE") or next(
+    (p for p in ("/usr/lib/systemd/systemd-sysupdate",) if os.path.exists(p)), "systemd-sysupdate")
 VERSION = "1"
 
 
@@ -302,6 +305,7 @@ def status(st):
         "config": {"source": cfg_status.get("source", ""), "base": base,
                    "rolled_back": st.get("rolled_back", "")},
         "errors": errors,
+        "update": st.get("update"),
     }
 
 
@@ -369,6 +373,7 @@ class WebSocket:
         sock.settimeout(None)
         self.sock = sock
         self.lock = threading.Lock()
+        self.save_lock = threading.Lock()
         self.closed = False
 
     def _send(self, opcode, payload):
@@ -569,14 +574,67 @@ class Agent:
         self.st = read_json(AGENT_STATE, {})
         self.results = []
         self.lock = threading.Lock()
+        self.save_lock = threading.Lock()
         self.wake = threading.Event()
         self.reboot_requested = False
         self.poll = 15
         self.failures = 0
 
+    # ---- status files for the on-screen overlay (/run/signage, no secrets)
+
+    def set_update(self, state, percent=None, message="", version=None):
+        u = dict(self.st.get("update") or {})
+        old = (u.get("state"), (u.get("percent") or 0) // 5)
+        u.update(state=state, message=message[:300], updated=int(time.time() * 1000))
+        if percent is not None:
+            u["percent"] = max(0, min(100, int(percent)))
+        if version is not None:
+            u["version"] = version
+        self.st["update"] = u
+        try:
+            write_atomic(RUN / "update.json", json.dumps(u))
+        except OSError:
+            pass
+        self.save()
+        if (u["state"], (u.get("percent") or 0) // 5) != old:
+            self.wake.set()  # report phase changes and each 5% promptly
+
+    def finish_update_after_boot(self):
+        """After an update's reboot, record whether we came up on the new version."""
+        u = self.st.get("update") or {}
+        if u.get("state") != "rebooting":
+            return
+        current = os_release().get("IMAGE_VERSION", "")
+        if u.get("version") and current != u["version"]:
+            self.set_update("failed", 100, f"still on {current} after reboot (boot fell back to the old version?)")
+        else:
+            self.set_update("done", 100, f"running {current}")
+
+    def write_agent_status(self, state, error=None):
+        url = self.dashboard()[0]
+        ident = read_json(IDENTITY, {})
+        now = int(time.time() * 1000)
+        if state == "connected":
+            self.st["last_ok"] = now
+        info = {
+            "state": state,
+            "dashboard": urllib.parse.urlsplit(url).hostname if url else None,
+            "device": socket.gethostname(),
+            "device_id": ident.get("device_id"),
+            "last_ok": self.st.get("last_ok"),
+            "last_attempt": now,
+            "error": (str(error)[:200] if error else None),
+            "content_generation": read_json(CONTENT, {}).get("generation", 0),
+        }
+        try:
+            write_atomic(RUN / "agent.json", json.dumps(info))
+        except OSError:
+            pass
+
     def save(self):
-        keep = {k: v for k, v in self.st.items() if k not in ("display_cache", "display_at")}
-        write_atomic(AGENT_STATE, json.dumps(keep, indent=1), 0o600)
+        with self.save_lock:
+            keep = {k: v for k, v in self.st.items() if k not in ("display_cache", "display_at")}
+            write_atomic(AGENT_STATE, json.dumps(keep, indent=1), 0o600)
 
     def result(self, cid, ok, output=""):
         with self.lock:
@@ -782,19 +840,51 @@ class Agent:
             if ctype == "terminal":
                 self.result(cid, True, terminal_session(args))
             elif ctype == "os-update":
-                cmd = ["systemd-sysupdate", "update"] + ([args["version"]] if args.get("version") else [])
-                r = run(cmd, timeout=3600)
-                out = (r.stdout + r.stderr)[-6000:]
-                if r.returncode != 0:
-                    self.result(cid, False, out)
-                    return
-                if "No update needed" in out or not out.strip():
-                    self.result(cid, True, out or "already up to date")
-                    return
-                self.result(cid, True, out + "\nrebooting into the new version")
-                self.reboot_requested = True
+                ok, out = self.os_update(args.get("version") or "")
+                self.result(cid, ok, out)
         except Exception as e:
             self.result(cid, False, f"{type(e).__name__}: {e}")
+
+    def os_update(self, version):
+        current = os_release().get("IMAGE_VERSION", "")
+        self.set_update("checking", 0, "looking for a new version", version or None)
+        if not version:
+            r = run([SYSUPDATE, "check-new"], timeout=120)
+            found = r.stdout.strip().splitlines()[-1].strip() if r.returncode == 0 and r.stdout.strip() else ""
+            if not found or found == current:
+                self.set_update("done", 100, f"already up to date ({current})", current)
+                return True, (r.stdout + r.stderr).strip() or "already up to date"
+            version = found
+            self.set_update("checking", 2, f"found {version}", version)
+        self.set_update("downloading", 3, f"downloading {version}", version)
+        log_tail = []
+        p = subprocess.Popen([SYSUPDATE, "update", version], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, errors="replace", bufsize=1)
+        transfers_done = 0
+        for line in p.stdout:
+            line = line.rstrip()
+            if not line:
+                continue
+            log_tail = (log_tail + [line])[-60:]
+            m = re.search(r"(\d{1,3})(?:\.\d+)?%", line)
+            if m:
+                # sysupdate reports per transfer (usr, verity, UKI); /usr dominates the size.
+                self.set_update("downloading", 3 + int(m.group(1)) * 0.85, line, version)
+            elif re.search(r"(?i)installing|writing|copying", line) and transfers_done == 0:
+                self.set_update("installing", max(self.st["update"].get("percent", 0), 88), line, version)
+            if re.search(r"(?i)successfully (acquired|installed)|transfer.*done", line):
+                transfers_done += 1
+        rc = p.wait()
+        out = "\n".join(log_tail)[-6000:]
+        if rc != 0:
+            self.set_update("failed", self.st["update"].get("percent", 0), (log_tail or ["sysupdate failed"])[-1], version)
+            return False, out
+        if "No update needed" in out:
+            self.set_update("done", 100, f"already on {version}", version)
+            return True, out
+        self.set_update("rebooting", 100, f"rebooting into {version}", version)
+        self.reboot_requested = True
+        return True, out + "\nrebooting into the new version"
 
     def screenshot(self, args):
         env = wayland_env()
@@ -850,22 +940,30 @@ class Agent:
     def loop(self):
         AGENT.mkdir(parents=True, exist_ok=True)
         os.chmod(AGENT, 0o700)
+        self.finish_update_after_boot()
         while True:
             url, token = self.dashboard()
             if not url:
+                self.write_agent_status("unconfigured", "no [dashboard] url in config.toml")
                 time.sleep(60)
                 continue
+            if self.failures == 0 and not self.st.get("last_ok"):
+                self.write_agent_status("connecting")
             try:
                 ident = self.identity(url, token)
                 resp = self.checkin(url, ident)
                 self.failures = 0
+                self.write_agent_status("connected")
                 self.handle(resp)
             except Unauthorized as e:
                 log(f"dashboard refused our credentials ({e}); enrolling again")
                 IDENTITY.unlink(missing_ok=True)
                 self.failures += 1
+                self.write_agent_status("error", f"dashboard refused this device: {e}")
             except Exception as e:
                 self.failures += 1
+                self.write_agent_status("offline" if self.st.get("last_ok") else "connecting",
+                                        f"{type(e).__name__}: {e}")
                 if self.failures in (1, 5) or self.failures % 60 == 0:
                     log(f"check-in failed ({type(e).__name__}: {e}); playing from cache")
                 self.maybe_roll_back()
