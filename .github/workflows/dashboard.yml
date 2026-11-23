@@ -1,0 +1,28 @@
+name: dashboard
+
+on:
+  push:
+    branches: [main]
+    paths: ["dashboard/**", "mkosi.extra/usr/lib/signage/signage-config", ".github/workflows/dashboard.yml"]
+  pull_request:
+    paths: ["dashboard/**", "mkosi.extra/usr/lib/signage/signage-config", ".github/workflows/dashboard.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install boto3 "moto[server,dynamodb,s3]" pytest cfn-lint websockets
+      - run: cfn-lint template.yaml
+      - run: python -m pytest -q tests/
+      - name: FAT32 builder
+        run: |
+          sudo apt-get install -y dosfstools
+          node tests/fat32_test.mjs /tmp/fat.img
+          fsck.fat -n /tmp/fat.img
