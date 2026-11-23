@@ -10,6 +10,7 @@
 // Interface: https://ograf.ebu.io/v1/specification/docs/Specification.html
 
 import { getStore, resolveRooms, resolveTracks, abbreviate, shortName, asList, DEFAULT_API } from "./schedule-data.mjs";
+import { QrFeed } from "./qr-feed.mjs";
 
 const DEFAULTS = {
     rooms: [],
@@ -28,6 +29,8 @@ const DEFAULTS = {
     background: "",
     apiBase: DEFAULT_API,
     refreshSeconds: 120,
+    qrUrl: "",
+    qrSeconds: 30,
 };
 
 // Tracks that are ratings or noise levels rather than topics: not shown as chips.
@@ -70,6 +73,14 @@ const STYLE = `
 .title { font-size: 5.6cqmin; font-weight: 800; line-height: 1.05; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .subtitle { font-size: 2.2cqmin; color: var(--muted); margin-top: .5cqmin; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .meta { text-align: right; flex: none; }
+/* QR code beside the clock: the slot widens from 0, pushing the clock left. */
+.meta-wrap { display: flex; align-items: center; flex: none; --qr: 14cqmin; }
+.qr-slot { width: 0; height: var(--qr); margin-left: 0; overflow: hidden; flex: none; opacity: 0;
+           transition: width .7s cubic-bezier(.2,.8,.2,1), margin-left .7s cubic-bezier(.2,.8,.2,1), opacity .5s .2s; }
+.qr-slot.on { width: var(--qr); margin-left: 2cqmin; opacity: 1; }
+.qr { position: relative; width: var(--qr); height: var(--qr); background: #fff; border-radius: .8cqmin; padding: .5cqmin; }
+.qr img { position: absolute; inset: .5cqmin; width: calc(100% - 1cqmin); height: calc(100% - 1cqmin); object-fit: contain;
+          image-rendering: pixelated; }
 .clock { font-size: 5cqmin; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
 .status { font-size: 1.8cqmin; color: var(--muted); margin-top: .6cqmin; min-height: 1em; }
 .status.warn { color: #ffb74d; }
@@ -104,6 +115,14 @@ const STYLE = `
 .desc { font-size: 2.3cqmin; line-height: 1.4; color: #cfd8df; margin-top: 1.6cqmin;
         display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .progress { margin-top: auto; padding-top: 2cqmin; }
+.chips-row { display: flex; align-items: center; gap: 1.6cqmin; margin-top: 1.2cqmin; }
+.chips-row .chips { margin-top: 0; flex: 1; min-width: 0; }
+.chips-row .times { flex: none; font-size: 2.4cqmin; }
+.hero-prog { display: flex; align-items: center; gap: 2cqmin; }
+.hero-prog .track { flex: 1; }
+.hero-prog .left { flex: none; margin-left: auto; font-size: 2.4cqmin; }
+.pager:empty { display: none; }
+.subtitle[hidden] { display: none; }
 .track { height: 1.3cqmin; border-radius: 99px; background: rgba(255,255,255,.12); overflow: hidden; }
 .fill { height: 100%; width: 0; background: var(--accent); border-radius: 99px; transition: width 1s linear; }
 .progress .times { display: flex; justify-content: space-between; margin-top: .9cqmin; font-size: 2.2cqmin; }
@@ -164,9 +183,11 @@ const STYLE = `
                       text-shadow: .25cqmin .35cqmin 0 var(--brown), 0 0 1.6cqmin rgba(0,0,0,.7); }
 .t-super2027 .subtitle { color: var(--fg); font-size: 2.3cqmin; text-shadow: 0 .2cqmin .5cqmin #000; }
 .t-super2027 .meta { display: flex; flex-direction: column; align-items: flex-end; }
+.t-super2027 .qr { border: .35cqmin solid var(--gold); border-radius: .6cqmin;
+                   box-shadow: 0 0 0 .35cqmin var(--brown), 0 .6cqmin 1.4cqmin rgba(0,0,0,.55); }
 .t-super2027 .clock { border-style: solid; border-color: transparent; border-width: 1.3cqmin 1.6cqmin;
                       border-image: var(--img-context) 34 40 fill / 1.3cqmin 1.6cqmin stretch;
-                      color: var(--brown); font-size: 4.2cqmin; padding: .4cqmin 1.4cqmin; }
+                      color: var(--brown); font-size: 6cqmin; padding: .4cqmin 1.6cqmin; }
 .t-super2027 .status { text-shadow: 0 .2cqmin .4cqmin #000; }
 /* Divider: the wave tile alone. (The pack's triangle piece has its waves at a different size, so it can't sit on the tile without looking like an overlap.) */
 .t-super2027 .divider { height: 3.2cqmin; flex: none; background: var(--img-wave) center / auto 100% repeat-x; }
@@ -186,7 +207,7 @@ const STYLE = `
 .t-super2027 .row .track { height: .7cqmin; border: none; background: rgba(0,0,0,.45); }
 .t-super2027 .sched .list { background: var(--panel); border: .3cqmin solid var(--gold); border-radius: .6cqmin; padding: 0 2.2cqmin;
     box-shadow: inset 0 0 0 .5cqmin rgba(48,30,18,.9), inset 0 0 0 .65cqmin rgba(228,188,96,.45), 0 .8cqmin 2cqmin rgba(0,0,0,.45); }
-.t-super2027 .hearts { display: flex; gap: .7cqmin; margin-top: 2cqmin; }
+.t-super2027 .hearts { display: flex; gap: .7cqmin; }
 .t-super2027 .hearts img { height: 4.2cqmin; width: auto; transition: opacity .6s, filter .6s;
                            filter: drop-shadow(0 .3cqmin .3cqmin rgba(0,0,0,.6)); }
 .t-super2027 .hearts img.spent { opacity: .38; filter: grayscale(1) brightness(.75); }
@@ -213,6 +234,10 @@ const STYLE = `
 .t-super2027 .card.compact .next { padding-top: .6cqmin; }
 @container (aspect-ratio < 1) {
     .t-super2027 .logo { height: 8cqmin; }
+    .meta-wrap { --qr: 12cqmin; }
+    .qr-slot.on { margin-left: 1.4cqmin; }
+    .t-super2027 .clock { font-size: 4.4cqmin; padding: .3cqmin 1cqmin; }
+    .t-super2027 .bar { gap: 1.8cqmin; }
 }
 /* portrait */
 @container (aspect-ratio < 1) {
@@ -284,6 +309,9 @@ export default class MagfestSchedule extends HTMLElement {
             this.data.timeZone = "";
             return this.setData({});
         }
+        d.qrUrl = String(d.qrUrl || "").trim();
+        d.qrSeconds = Math.max(5, Number(d.qrSeconds) || DEFAULTS.qrSeconds);
+        if (this.els?.qr) this.setQr(d.qrUrl, d.qrSeconds);
         if (resubscribe) {
             this.unsub?.();
             this.store = getStore(d.apiBase);
@@ -377,11 +405,14 @@ export default class MagfestSchedule extends HTMLElement {
             c ? [
                 h("div", { class: "label" }, h("span", { class: "dot" }), "Now"),
                 h("div", { class: "now-name" }, c.name),
-                h("div", { class: "chips" }, this.chips(c, m)),
+                // Time range on the chips row; time left on the hearts (or progress bar) row.
+                h("div", { class: "chips-row" }, h("div", { class: "chips" }, this.chips(c, m)), h("span", { class: "times" }, this.range(c, now))),
                 this.data.showDescription && c.desc ? h("div", { class: "desc" }, c.desc) : null,
-                h("div", { class: "hearts s27", "data-hearts-start": c.start, "data-hearts-end": c.end },
-                    Array.from({ length: HEARTS }, () => h("img", { src: asset("heart-full.png"), alt: "" }))),
-                this.progress(c, now, false),
+                h("div", { class: "progress hero-prog" },
+                    h("div", { class: "hearts s27", "data-hearts-start": c.start, "data-hearts-end": c.end },
+                        Array.from({ length: HEARTS }, () => h("img", { src: asset("heart-full.png"), alt: "" }))),
+                    h("div", { class: "track" }, h("div", { class: "fill", "data-start": c.start, "data-end": c.end })),
+                    h("span", { class: "left", "data-left": c.end }, this.left(c, now))),
             ] : h("div", { class: "idle" }, n ? "Nothing on right now" : "No more sessions scheduled"),
             n ? h("div", { class: "next" },
                 h("div", { class: "label" }, "Up next", h("span", { class: "when", "data-until": n.start }, this.until(n, now))),
@@ -456,14 +487,15 @@ export default class MagfestSchedule extends HTMLElement {
 
     renderHeader(m) {
         const d = this.data;
-        let title = d.title, sub = this.fmtDate.format(m.now);
+        let title = d.title, sub = "";
         if (m.state === "rooms" && !title) {
             const r = m.rooms || [];
             title = r.length === 1 ? r[0].short : "Now and next";
-            if (r.length === 1 && r[0].name !== r[0].short) sub = `${r[0].name.slice(r[0].short.length).trim().replace(/^\(|\)$/g, "")} · ${sub}`;
+            if (r.length === 1 && r[0].name !== r[0].short) sub = r[0].name.slice(r[0].short.length).trim().replace(/^\(|\)$/g, "");
         }
         this.els.title.textContent = title || "Schedule";
         this.els.subtitle.textContent = sub;
+        this.els.subtitle.hidden = !sub;
         this.renderStatus(m);
     }
 
@@ -630,13 +662,13 @@ export default class MagfestSchedule extends HTMLElement {
         root.innerHTML = `<style>${STYLE}</style>
             <div class="frame"><header class="bar"><img class="logo s27" alt="">
             <div style="min-width:0;flex:1"><div class="title"></div><div class="subtitle"></div></div>
-            <div class="meta"><div class="clock"></div><div class="status"></div></div></header>
+            <div class="meta-wrap"><div class="meta"><div class="clock"></div><div class="status"></div></div><div class="qr-slot"><div class="qr"></div></div></div></header>
             <div class="divider s27"></div><main class="body"></main></div>`;
         root.querySelector(".logo").src = asset("logo-flat.png");
         for (const [k, f] of [["--img-bg", "background-crest-fabric.png"], ["--img-context", "context-box.png"], ["--img-heading", "heading-box-long.png"],
             ["--img-wave", "squarewave-brown-tile.png"]]) this.style.setProperty(k, `url("${asset(f)}")`);
         const q = (s) => root.querySelector(s);
-        this.els = { frame: q(".frame"), bar: q(".bar"), logo: q(".logo"), divider: q(".divider"), title: q(".title"), subtitle: q(".subtitle"), clock: q(".clock"), status: q(".status"), body: q(".body"), regions: {} };
+        this.els = { frame: q(".frame"), bar: q(".bar"), logo: q(".logo"), divider: q(".divider"), title: q(".title"), subtitle: q(".subtitle"), clock: q(".clock"), status: q(".status"), body: q(".body"), qr: q(".qr"), qrSlot: q(".qr-slot"), regions: {} };
         this.setData(data);
         // Show cached data at once; with no cache, give the network a moment.
         await Promise.all([this.store.ready(5000), loadFonts(), this.decodeImages()]);
@@ -661,7 +693,36 @@ export default class MagfestSchedule extends HTMLElement {
 
     get themed() { return this.data.theme === "super2027"; }
 
+    // ------------------------------------------------------------ QR code
+
+    // Start, change or stop the QR feed. The frame slides in beside the clock
+    // once there is a code to show, and slides out when the URL is cleared.
+    setQr(url, seconds) {
+        if (url === this.qrFeed?.url && seconds === this.qrFeed?.seconds) return;
+        this.qrFeed?.stop();
+        this.qrFeed = url ? new QrFeed(url, seconds, (src) => this.showQr(src)) : null;
+        this.showQr(this.qrFeed?.src || "");
+    }
+
+    showQr(src) {
+        const box = this.els.qr, slot = this.els.qrSlot;
+        if (!src) { slot.classList.remove("on"); return; }
+        const img = Object.assign(document.createElement("img"), { alt: "", src, decoding: "async" });
+        const old = [...box.children];
+        const ready = img.decode ? img.decode().catch(() => {}) : Promise.resolve();
+        ready.then(() => {
+            if (this.qrFeed?.src !== src) return;
+            box.append(img);
+            slot.classList.add("on");
+            if (this.visible && old.length) {
+                img.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 400, easing: EASE });
+                setTimeout(() => old.forEach((o) => o.remove()), 420);
+            } else old.forEach((o) => o.remove());
+        });
+    }
+
     async dispose() {
+        this.qrFeed?.stop();
         clearInterval(this.ticker);
         this.onResize?.disconnect();
         this.unsub?.();
@@ -740,7 +801,7 @@ export default class MagfestSchedule extends HTMLElement {
     }
 
     async customAction({ id } = {}) {
-        if (id === "refresh") { await this.store.refresh(); return { statusCode: 200 }; }
+        if (id === "refresh") { await Promise.all([this.store.refresh(), this.qrFeed?.refresh()]); return { statusCode: 200 }; }
         return { statusCode: 404, statusMessage: `Unknown action ${id}` };
     }
 

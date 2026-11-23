@@ -65,6 +65,14 @@ the dark version without the art.
 | `accent`, `background` | `""` | Override the theme's colours. With `plain`, a transparent background shows the layers behind. |
 | `apiBase` | `https://schedule.magfest.net` | Schedule server. |
 | `refreshSeconds` | `120` | How often to fetch (at least 30). |
+| `qrUrl` | `""` | Optional. Shows a QR code from this URL in a frame to the right of the clock (the clock slides over to make room). See below. |
+| `qrSeconds` | `30` | How often to fetch `qrUrl` (at least 5). |
+
+In the manifest, `rooms`, `tracks` and `excludeTracks` carry
+`"x-signage-options": {"source": "schedule", "list": "locations" | "tracks", "baseParam": "apiBase"}`,
+so the dashboard can offer the names from `<apiBase>/locations` or `/tracks`
+as a searchable multi-select (free text still works). `accent` and
+`background` have `"format": "color"`.
 
 ## Offline
 
@@ -78,6 +86,24 @@ refresh interval. An empty response from a server that had sessions before
 is treated as an error, so the cache isn't wiped. All graphics on the page
 share one copy and one fetch.
 
+## QR code
+
+For games: set `qrUrl` and a QR code appears to the right of the clock,
+fetched again every `qrSeconds`. The URL can return:
+
+- an image (`image/png`, `image/svg+xml`, ...), shown as is;
+- text, such as the link the code should open, which is turned into a QR
+  code on the sign (`vendor/qrcode.mjs`, qrcode-generator, MIT);
+- JSON: a string, or an object with a `qr`, `url`, `text`, `data` or `value`
+  field holding text, a `data:image/...` URL or SVG.
+
+Text and JSON need the server to send CORS headers
+(`Access-Control-Allow-Origin: *`); an image works without them. The code
+cross-fades when it changes. The last good code is kept in `localStorage`, so
+it stays up when the URL can't be reached (failed fetches retry after 5 s,
+10 s, 20 s ... up to `qrSeconds`). Clearing `qrUrl` slides the frame away.
+`refresh` also fetches the QR code.
+
 ## OGraf
 
 Real-time only, one step. `playAction` fades the frame in and slides the
@@ -85,7 +111,7 @@ header and cards up (about 1.4 s); `stopAction` fades them out (about
 0.7 s), so a layer can animate one graphic out and the next in.
 `updateAction` takes new settings and cross-fades. Inside the graphic,
 changes (a session ending, the next page) cross-fade the part that changed.
-Custom action `refresh` fetches the schedule now.
+Custom action `refresh` fetches the schedule (and the QR code) now.
 
 ## Packaging
 
