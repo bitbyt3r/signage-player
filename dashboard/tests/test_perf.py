@@ -65,3 +65,28 @@ def test_perf_sample(tmp_path, monkeypatch):
     assert len(p.pending()) == 2
     p.ack(s["t"])
     assert [x["t"] for x in p.pending()] == [s2["t"]]
+
+
+def test_profiles_listed_and_fetched(tmp_path, monkeypatch):
+    mod = load(tmp_path, monkeypatch)
+    prof = tmp_path / "state/profiles"
+    prof.mkdir(parents=True)
+    (prof / "profile-sign-1.json.gz").write_bytes(b"x" * 10)
+    (prof / "notes.txt").write_text("no")
+    assert [p["name"] for p in mod.list_profiles()] == ["profile-sign-1.json.gz"]
+    a = mod.Agent()
+    up = []
+    monkeypatch.setattr(a, "upload_file", lambda path, url: up.append((Path(path).name, url)) or 10)
+    a._threaded("c1", "fetch-file", {"name": "profile-sign-1.json.gz", "upload_url": "https://u"})
+    a._threaded("c2", "fetch-file", {"name": "../profile-x.json.gz", "upload_url": "https://u"})
+    assert up == [("profile-sign-1.json.gz", "https://u")]
+    assert a.results[0]["ok"] and a.results[0]["file"] == "profile-sign-1.json.gz"
+    assert not a.results[1]["ok"]
+    # profile: runs signage-profile, then uploads the file it wrote.
+    tool = tmp_path / "signage-profile"
+    tool.write_text(f"#!/bin/sh\necho captured $1\necho data > {prof}/profile-sign-2.json.gz\n")
+    tool.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
+    a._threaded("c3", "profile", {"seconds": 5, "upload_url": "https://v"})
+    assert up[-1] == ("profile-sign-2.json.gz", "https://v")
+    assert a.results[2]["ok"] and "captured 5" in a.results[2]["output"] and a.results[2]["file"] == "profile-sign-2.json.gz"

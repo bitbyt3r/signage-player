@@ -371,6 +371,31 @@ def test_perf_samples(aws):
     assert "perf_ack" not in call("POST", "/device/checkin", {}, device=(did, dtok))[1]
 
 
+def test_profile_and_fetch_file(aws):
+    token = login()
+    did, dtok = enroll("52:54:00:00:00:66")
+    assert call("POST", f"/api/devices/{did}/commands", {"type": "profile", "args": {"seconds": 500}}, token)[0] == 400
+    assert call("POST", f"/api/devices/{did}/commands", {"type": "fetch-file", "args": {"name": "../../etc/shadow"}}, token)[0] == 400
+    s, prof = call("POST", f"/api/devices/{did}/commands", {"type": "profile", "args": {"seconds": 20, "x": 1}}, token)
+    assert s == 200 and prof["args"] == {"seconds": 20}
+    s, fetch = call("POST", f"/api/devices/{did}/commands", {"type": "fetch-file", "args": {"name": "profile-sign-1.json.gz"}}, token)
+    assert s == 200
+    s, r = call("POST", "/device/checkin", {}, device=(did, dtok))
+    sent = {c["type"]: c for c in r["commands"]}
+    assert sent["profile"]["args"]["upload_url"].startswith("http") and sent["profile"]["args"]["key"].startswith(f"files/{did}/")
+    assert sent["fetch-file"]["args"]["name"] == "profile-sign-1.json.gz"
+    assert call("GET", f"/api/devices/{did}/commands/{prof['id']}/file", None, token)[0] == 404   # not done yet
+    common.s3().put_object(Bucket=common.BUCKET, Key=sent["profile"]["args"]["key"], Body=b"gz")
+    call("POST", "/device/checkin", {"results": [{"id": prof["id"], "ok": True, "output": "ok", "file": "profile-sign-2.json.gz"},
+                                                 {"id": fetch["id"], "ok": True, "output": "ok", "file": "../evil"}]}, device=(did, dtok))
+    s, r = call("GET", f"/api/devices/{did}/commands/{prof['id']}/file", None, token)
+    assert s == 200 and r["name"] == "profile-sign-2.json.gz" and "response-content-disposition" in r["url"].lower()
+    s, r = call("GET", f"/api/devices/{did}/commands/{fetch['id']}/file", None, token)
+    assert s == 200 and r["name"] == "profile-sign-1.json.gz"
+    dev = call("GET", f"/api/devices/{did}", None, token)[1]
+    assert all("upload_url" not in c["args"] for c in dev["commands"])
+
+
 def test_terminal_ws_auth(aws):
     did, tok = enroll()
     token = login()

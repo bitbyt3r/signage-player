@@ -168,6 +168,12 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   time to see every value then and which graphics were on screen. The agent
   samples every 10 s and keeps 2 h if the dashboard is unreachable; the
   dashboard keeps samples for 3 h.
+- **GPU profile**: on a device page, records a Firefox Profiler trace for
+  the given seconds (the image's `signage-profile`) and uploads it; click
+  *Download* in the command history and open it at profiler.firefox.com.
+  Profiles already on the device (`/var/lib/signage/profiles/`) are listed
+  under Status with *Fetch*. Files are kept 14 days. *Renderer* in Status
+  shows the GL renderer, flagged when Firefox is rendering in software.
 - **Terminal**: a root shell on the device, in the browser. The device opens
   the connection when asked (within a few seconds while you have its page
   open), so it works behind NAT. Close it with *Close* or `exit`.

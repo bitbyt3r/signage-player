@@ -40,7 +40,8 @@ SESSION_TTL = 12 * 3600
 CMD_TTL = 7 * 86400
 SHOT_TTL = 14 * 86400
 PERF_TTL = 3 * 3600
-COMMANDS = {"reboot", "restart-player", "screenshot", "os-update", "resync"}
+COMMANDS = {"reboot", "restart-player", "screenshot", "os-update", "resync", "profile", "fetch-file"}
+PROFILE_RE = re.compile(r"^profile-[A-Za-z0-9._-]{1,100}\.json\.gz$")
 
 
 class HttpError(Exception):
@@ -306,7 +307,35 @@ def post_command(req, did):
     if body.get("type") == "os-update" and args.get("version"):
         if validate.slug(args["version"], "version"):
             raise HttpError(400, "bad version")
+    if body.get("type") == "profile":
+        secs = args.get("seconds", 20)
+        if not validate.is_int(secs) or not 5 <= secs <= 120:
+            raise HttpError(400, "profile length must be 5 to 120 seconds")
+        args = {"seconds": secs}
+    if body.get("type") == "fetch-file":
+        if not isinstance(args.get("name"), str) or not PROFILE_RE.match(args["name"]):
+            raise HttpError(400, "only profiles (profile-*.json.gz) can be downloaded")
+        args = {"name": args["name"]}
     return resp(200, queue_command(did, body.get("type"), args))
+
+
+def cid_of(item):
+    return item["sk"][4:]
+
+
+@route("GET", "/api/devices/{did}/commands/{cid}/file")
+def command_file(req, did, cid):
+    """A short-lived link to a file a profile or fetch-file command uploaded."""
+    item = device_item(did)
+    x = c.get(item["pk"], f"CMD#{cid}")
+    cmd = c.loads(x["data"]) if x else None
+    if not cmd or cmd["type"] not in ("profile", "fetch-file") or cmd["state"] != "done" or not cmd["args"].get("key"):
+        raise HttpError(404, "no file for that command")
+    name = cmd.get("file") or cmd["args"].get("name") or f"profile-{did}-{cid}.json.gz"
+    url = c.s3().generate_presigned_url("get_object", Params={
+        "Bucket": c.BUCKET, "Key": cmd["args"]["key"],
+        "ResponseContentDisposition": f'attachment; filename="{name}"'}, ExpiresIn=600)
+    return resp(200, {"url": url, "name": name})
 
 
 @route("POST", "/api/devices/{did}/terminal")
@@ -450,6 +479,9 @@ def checkin(req):
         cmd = c.loads(x["data"])
         cmd.update(state="done" if r.get("ok") else "failed", done=c.now(),
                    output=str(r.get("output", ""))[-8000:])
+        if cmd["type"] in ("profile", "fetch-file") and r.get("ok") and isinstance(r.get("file"), str) \
+                and PROFILE_RE.match(r["file"]):
+            cmd["file"] = r["file"]
         c.update(pk, f"CMD#{cid}", {"data": c.dumps(cmd)})
         if cmd["type"] == "screenshot" and r.get("ok") and cmd["args"].get("key"):
             c.put({"pk": pk, "sk": f"SHOT#{c.now_ms()}", "key": cmd["args"]["key"],
@@ -470,6 +502,12 @@ def checkin(req):
                 cmd["args"]["upload_url"] = c.s3().generate_presigned_url(
                     "put_object", Params={"Bucket": c.BUCKET, "Key": key, "ContentType": "image/png"},
                     ExpiresIn=900)
+            if cmd["type"] in ("profile", "fetch-file"):
+                key = f"files/{did}/{cid_of(x)}.json.gz"
+                cmd["args"]["key"] = key
+                cmd["args"]["upload_url"] = c.s3().generate_presigned_url(
+                    "put_object", Params={"Bucket": c.BUCKET, "Key": key, "ContentType": "application/gzip"},
+                    ExpiresIn=3600)
             cmd["state"] = "sent"
             cmd["sent"] = c.now()
             commands.append({k: cmd[k] for k in ("id", "type", "args")})

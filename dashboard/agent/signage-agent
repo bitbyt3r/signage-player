@@ -47,6 +47,8 @@ CONFIG = STATE / "config.toml"
 OVERRIDES = STATE / "overrides.toml"
 OVERRIDES_PREV = STATE / "overrides.toml.prev"
 CONTENT = STATE / "content.json"
+PROFILES = STATE / "profiles"
+PROFILE_RE = re.compile(r"^profile-[A-Za-z0-9._-]{1,100}\.json\.gz$")
 PACKAGES = STATE / "packages"
 SIGNAGE_CONFIG = os.environ.get("SIGNAGE_CONFIG_BIN", "/usr/lib/signage/signage-config")
 DRY_RUN = os.environ.get("SIGNAGE_AGENT_DRY_RUN") == "1"  # tests: don't touch the system
@@ -306,7 +308,18 @@ def status(st):
                    "rolled_back": st.get("rolled_back", "")},
         "errors": errors,
         "update": st.get("update"),
+        "renderer": (read_json(RUN / "perf.json", {}) or {}).get("renderer"),
+        "profiles": list_profiles(),
     }
+
+
+def list_profiles():
+    out = []
+    for f in PROFILES.glob("profile-*.json.gz") if PROFILES.is_dir() else []:
+        if PROFILE_RE.match(f.name):
+            st = f.stat()
+            out.append({"name": f.name, "size": st.st_size, "mtime": int(st.st_mtime)})
+    return sorted(out, key=lambda x: -x["mtime"])[:10]
 
 
 # ------------------------------------------------------------------ HTTP
@@ -839,9 +852,12 @@ class Agent:
             keep = {k: v for k, v in self.st.items() if k not in ("display_cache", "display_at")}
             write_atomic(AGENT_STATE, json.dumps(keep, indent=1), 0o600)
 
-    def result(self, cid, ok, output=""):
+    def result(self, cid, ok, output="", file=None):
+        r = {"id": cid, "ok": ok, "output": str(output)[-8000:]}
+        if file:
+            r["file"] = file
         with self.lock:
-            self.results.append({"id": cid, "ok": ok, "output": str(output)[-8000:]})
+            self.results.append(r)
         self.wake.set()
 
     # ---- config and identity
@@ -1017,7 +1033,7 @@ class Agent:
     def command(self, cmd):
         cid, ctype, args = cmd["id"], cmd["type"], cmd.get("args") or {}
         log(f"command {ctype} ({cid})")
-        if ctype in ("terminal", "os-update"):
+        if ctype in ("terminal", "os-update", "profile", "fetch-file"):
             threading.Thread(target=self._threaded, args=(cid, ctype, args), daemon=True).start()
             return
         try:
@@ -1045,6 +1061,15 @@ class Agent:
             elif ctype == "os-update":
                 ok, out = self.os_update(args.get("version") or "")
                 self.result(cid, ok, out)
+            elif ctype == "profile":
+                self.profile(cid, args)
+            elif ctype == "fetch-file":
+                name = str(args.get("name", ""))
+                if not PROFILE_RE.match(name) or not (PROFILES / name).is_file():
+                    self.result(cid, False, f"no profile named {name!r}")
+                else:
+                    size = self.upload_file(PROFILES / name, args["upload_url"])
+                    self.result(cid, True, f"uploaded {name} ({size} bytes)", file=name)
         except Exception as e:
             self.result(cid, False, f"{type(e).__name__}: {e}")
 
@@ -1106,6 +1131,28 @@ class Agent:
         self.set_update("rebooting", 100, f"rebooting into {version}", version)
         self.reboot_requested = True
         return True, out + "\nrebooting into the new version"
+
+    def upload_file(self, path, url):
+        data = Path(path).read_bytes()
+        req = urllib.request.Request(url, data=data, method="PUT", headers={"Content-Type": "application/gzip"})
+        with urllib.request.urlopen(req, timeout=300):
+            pass
+        return len(data)
+
+    def profile(self, cid, args):
+        """Capture a Firefox Profiler trace with the image's signage-profile, then upload it."""
+        secs = int(args.get("seconds") or 20)
+        tool = shutil.which("signage-profile") or "/usr/bin/signage-profile"
+        before = {p["name"] for p in list_profiles()}
+        r = run([tool, str(secs)], timeout=secs + 180)
+        out = (r.stdout + r.stderr).strip()[-4000:]
+        new = [p for p in list_profiles() if p["name"] not in before]
+        if r.returncode != 0 or not new:
+            self.result(cid, False, out or f"signage-profile exited with {r.returncode} and wrote no profile")
+            return
+        name = new[0]["name"]
+        size = self.upload_file(PROFILES / name, args["upload_url"])
+        self.result(cid, True, (out + "\n" if out else "") + f"uploaded {name} ({size} bytes)", file=name)
 
     def screenshot(self, args):
         env = wayland_env()

@@ -358,7 +358,7 @@ function settingsForm(dev, onSave) {
   h("button", { class: "primary", type: "submit" }, "Save settings"));
 }
 
-function statusPanel(dev) {
+function statusPanel(dev, command) {
   const st = dev.status || {};
   const sum = dev.summary;
   const net = sum.network || {};
@@ -378,6 +378,11 @@ function statusPanel(dev) {
     h("dt", {}, "Clock"), h("dd", {}, clockText(dev), ntp.source ? h("span", { class: "muted" }, ` · NTP ${ntp.source}, offset ${((ntp.offset || 0) * 1000).toFixed(1)} ms`) : ""),
     h("dt", {}, "Display"), h("dd", { class: "mono" }, disp || "unknown"),
     h("dt", {}, "Player"), h("dd", {}, sum.player || "?"),
+    st.renderer ? [h("dt", {}, "Renderer"), h("dd", { class: "small" },
+      /llvmpipe|softpipe|swrast|software/i.test(st.renderer) ? h("span", { class: "warn" }, "Software rendering: ") : "", st.renderer)] : null,
+    st.profiles?.length ? [h("dt", {}, "GPU profiles"), h("dd", {}, st.profiles.map((f) => h("div", { class: "row small" },
+      h("span", { class: "mono" }, f.name), h("span", { class: "muted" }, `${bytes(f.size)} · ${ago(f.mtime)}`),
+      command ? h("button", { class: "small ghost", onclick: () => command("fetch-file", { name: f.name }) }, "Fetch") : "")))] : null,
     h("dt", {}, "Content"), h("dd", {}, content.rev ? h("span", { class: content.rev === dev.content_rev ? "" : "warn" }, `rev ${content.rev}`) : "none",
       content.error ? h("div", { class: "bad" }, content.error) : ""),
     h("dt", {}, "Disk"), h("dd", {}, st.disk ? `${bytes(st.disk.used)} of ${bytes(st.disk.total)} used` : "?"),
@@ -399,12 +404,14 @@ async function viewDevice(id) {
   const title = h("h1");
   const renderHead = () => {
     title.replaceChildren(h("span", { class: `dot ${dev.online ? "on" : "off"}` }), dev.name);
-    statusBox.replaceChildren(statusPanel(dev));
+    statusBox.replaceChildren(statusPanel(dev, command));
     cmdBox.replaceChildren(...dev.commands.map((cmd) => h("tr", {},
-      h("td", {}, cmd.type, cmd.args?.version ? ` ${cmd.args.version}` : ""),
+      h("td", {}, cmd.type, cmd.args?.version ? ` ${cmd.args.version}` : "", cmd.args?.seconds ? ` ${cmd.args.seconds}s` : "", cmd.file || cmd.args?.name ? h("div", { class: "muted small mono" }, cmd.file || cmd.args.name) : ""),
       h("td", { class: cmd.state === "failed" ? "bad" : cmd.state === "done" ? "ok" : "muted" }, cmd.state),
       h("td", { title: new Date(cmd.created * 1000).toLocaleString() }, ago(cmd.created)),
-      h("td", {}, cmd.output ? h("details", {}, h("summary", { class: "small" }, "output"), h("pre", { class: "small" }, cmd.output)) : ""))));
+      h("td", {}, (cmd.type === "profile" || cmd.type === "fetch-file") && cmd.state === "done"
+        ? h("button", { class: "small primary", onclick: () => downloadFile(cmd) }, "Download") : "",
+        cmd.output ? h("details", {}, h("summary", { class: "small" }, "output"), h("pre", { class: "small" }, cmd.output)) : ""))));
     if (!dev.commands.length) cmdBox.replaceChildren(h("tr", {}, h("td", { colspan: 4, class: "muted" }, "No commands yet.")));
   };
 
@@ -426,6 +433,15 @@ async function viewDevice(id) {
         h("img", { src: s.url, title: new Date(s.taken * 1000).toLocaleString(), onclick: () => zoom(s.url) }))) : "");
   };
 
+  const downloadFile = async (cmd) => {
+    try {
+      const r = await api("GET", `/api/devices/${id}/commands/${cmd.id}/file`);
+      const a = h("a", { href: r.url, download: r.name });
+      document.body.append(a);
+      a.click();
+      a.remove();
+    } catch (e) { toast(e.message); }
+  };
   const command = async (type, args) => {
     try {
       const cmd = await api("POST", `/api/devices/${id}/commands`, { type, args });
@@ -523,6 +539,10 @@ async function viewDevice(id) {
         h("button", { onclick: () => openTerminal(id, termBox) }, "Terminal"),
         h("button", { onclick: () => command("restart-player") }, "Restart player"),
         h("button", { onclick: () => command("resync") }, "Re-sync content"),
+        h("button", { title: "Record a Firefox Profiler trace (open it at profiler.firefox.com)", onclick: () => {
+          const v = prompt("Record a GPU / Firefox profile for how many seconds (5 to 120)?", "20");
+          if (v !== null) command("profile", { seconds: Number(v) || 20 });
+        } }, "GPU profile"),
         h("button", { onclick: () => {
           const v = prompt("OS version to install (blank = newest release). The device reboots into it.", "");
           if (v !== null) command("os-update", v.trim() ? { version: v.trim() } : {});
