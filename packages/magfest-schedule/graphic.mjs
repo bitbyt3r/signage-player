@@ -155,20 +155,23 @@ const STYLE = `
 
 /* ---- list rows (side list and schedule mode) */
 .row { display: grid; grid-template-columns: 14cqmin minmax(0, 1fr); gap: 1.6cqmin; align-items: center;
-       border-bottom: .15cqmin solid var(--line); padding: .9cqmin 0; min-height: 0; overflow: hidden; }
+       border-bottom: .15cqmin solid var(--line); padding: .9cqmin 0; min-height: 0;
+       /* Clip long content, but leave room at the sides for the Trihard's glow. */
+       overflow: hidden; overflow: clip; overflow-clip-margin: 1.6cqmin; }
 .row .t { font-size: 2.4cqmin; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .row .t small { display: block; font-size: .72em; font-weight: 400; color: var(--muted); }
 .row .t.live { color: var(--accent); letter-spacing: .1em; }
-.row .n { font-size: 2.6cqmin; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row .r { font-size: 1.9cqmin; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: .2cqmin; }
-.row .track { height: .6cqmin; margin-top: .6cqmin; }
+.row .n { font-size: 2.6cqmin; font-weight: 600; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .r { font-size: 1.9cqmin; color: var(--muted); line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: .2cqmin; }
+/* Space under the progress bar so it doesn't sit on the row's divider line. */
+.row .track { height: .6cqmin; margin: .5cqmin 0 .9cqmin; }
 
 /* ---- schedule mode */
 .sched { height: 100%; display: flex; flex-direction: column; gap: 1.4cqmin; }
 .sched .list { flex: 1; min-height: 0; display: grid; grid-auto-flow: column; column-gap: 4cqmin;
                grid-template-columns: repeat(var(--cols, 1), minmax(0, 1fr));
                grid-template-rows: repeat(var(--rows, 8), var(--row-h)); align-content: start; }
-.sched .row { height: var(--row-h); }
+.sched .row { height: var(--row-h); padding: .5cqmin 0; }
 
 /* ---- Super MAGFest 2027 theme */
 .s27 { display: none; }
@@ -191,7 +194,8 @@ const STYLE = `
 .t-super2027 .status { text-shadow: 0 .2cqmin .4cqmin #000; }
 /* Divider: the wave tile alone. (The pack's triangle piece has its waves at a different size, so it can't sit on the tile without looking like an overlap.) */
 .t-super2027 .divider { height: 3.2cqmin; flex: none; background: var(--img-wave) center / auto 100% repeat-x; }
-@keyframes glint { 50% { filter: drop-shadow(0 0 .9cqmin rgba(255,226,140,.95)) brightness(1.25); } }
+@keyframes glint { 0%, 100% { filter: drop-shadow(0 0 .9cqmin rgba(255,226,140,0)) brightness(1); }
+                   50% { filter: drop-shadow(0 0 .9cqmin rgba(255,226,140,.95)) brightness(1.25); } }
 .t-super2027 .card, .t-super2027 .side { background: var(--panel); border: .3cqmin solid var(--gold); border-radius: .6cqmin;
     box-shadow: inset 0 0 0 .5cqmin rgba(48,30,18,.9), inset 0 0 0 .65cqmin rgba(228,188,96,.45), 0 .8cqmin 2cqmin rgba(0,0,0,.45); }
 .t-super2027 .side h2, .t-super2027 .label { font-family: "S27 Hylia", serif; font-weight: 400; letter-spacing: .06em;

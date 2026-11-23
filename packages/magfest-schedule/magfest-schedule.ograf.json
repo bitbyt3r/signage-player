@@ -1,7 +1,7 @@
 {
   "$schema": "https://ograf.ebu.io/v1/specification/json-schemas/graphics/schema.json",
   "id": "magfest-schedule",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "name": "MAGFest schedule",
   "description": "Full-screen schedule in the Super MAGFest 2027 style from schedule.magfest.net. With rooms set: the current session in each room with a progress bar, up next, and a short list of what's later. With no rooms: the schedule by itself, paging through what's on now and coming up. Cached on the device, so it keeps working offline.",
   "author": {
