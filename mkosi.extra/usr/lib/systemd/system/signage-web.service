@@ -1,12 +1,10 @@
 [Unit]
-Description=Local web server for the signage host page and OGraf packages
-# Firefox won't import ES modules from file://, so the kiosk loads the host
-# page and graphics from here. /usr/share/signage/status links to the
-# kiosk's runtime directory for the status overlay.
+Description=Local web server for the signage player page and OGraf packages
+# See /usr/lib/signage/signage-web for what it serves.
 Before=signage-player.service
 
 [Service]
-ExecStart=/usr/bin/python3 -m http.server 8080 --bind 127.0.0.1 --directory /usr/share/signage
+ExecStart=/usr/lib/signage/signage-web
 DynamicUser=yes
 ProtectSystem=strict
 ProtectHome=yes

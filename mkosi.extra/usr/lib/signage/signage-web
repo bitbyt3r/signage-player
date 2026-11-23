@@ -1,0 +1,69 @@
+#!/usr/bin/python3
+"""Local web server for the player page, OGraf packages and status files.
+
+Firefox won't import ES modules from file://, so the kiosk loads everything
+from http://127.0.0.1:8080 (keep that origin stable: graphics keep their
+offline caches in its localStorage).
+
+  /content.json  /var/lib/signage/content.json (the dashboard agent writes it)
+  /packages/...  /var/lib/signage/packages/<id>/<version>/... (from the
+                 dashboard), else the packages baked into the image
+                 (/usr/share/signage/packages/<id>/...)
+  /status/...    the kiosk's status.json and the agent's update.json and
+                 agent.json (/usr/share/signage/status -> /run/signage-kiosk)
+  everything else from /usr/share/signage (/player/, /host/)
+
+Nothing else under /var/lib/signage is reachable (config.toml has the WiFi
+passwords). Everything is sent no-cache: it's all local, and a package
+version or content.json can change under the same URL during development.
+"""
+import http.server
+import os
+import sys
+from pathlib import Path
+
+STATE = Path(os.environ.get("SIGNAGE_STATE", "/var/lib/signage"))
+SHARE = Path(os.environ.get("SIGNAGE_SHARE", "/usr/share/signage"))
+PORT = int(os.environ.get("SIGNAGE_WEB_PORT", "8080"))
+BIND = os.environ.get("SIGNAGE_WEB_BIND", "127.0.0.1")
+
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        ".mjs": "text/javascript", ".js": "text/javascript", ".json": "application/json",
+        ".svg": "image/svg+xml", ".woff2": "font/woff2", ".webp": "image/webp",
+    }
+
+    def translate_path(self, path):
+        # SimpleHTTPRequestHandler's own translation (decoding, no "..")
+        # relative to a root we pick per prefix.
+        rel = Path(super().translate_path(path)).relative_to(Path(self.directory))
+        parts = rel.parts
+        if parts[:1] == ("content.json",):
+            return str(STATE / "content.json")
+        if parts[:1] == ("packages",):
+            dl = STATE.joinpath(*parts)
+            if dl.exists():
+                return str(dl)
+        return str(SHARE.joinpath(*parts))
+
+    def list_directory(self, path):
+        self.send_error(404)
+        return None
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store" if self.path.split("?")[0].endswith(".json") else "no-cache")
+        super().end_headers()
+
+    def log_message(self, fmt, *args):
+        # Only errors: the player polls every 2 s, and the agent's status
+        # files only exist while it has something to say.
+        if len(args) > 1 and str(args[1])[:1] in "45" and not self.path.startswith("/status/"):
+            sys.stderr.write("signage-web: %s\n" % (fmt % args))
+
+
+if __name__ == "__main__":
+    handler = lambda *a, **kw: Handler(*a, directory=str(SHARE), **kw)
+    with http.server.ThreadingHTTPServer((BIND, PORT), handler) as httpd:
+        httpd.serve_forever()
