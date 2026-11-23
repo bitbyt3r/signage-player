@@ -5,14 +5,17 @@ set -uo pipefail
 
 DISPLAY_JSON=/run/signage/display.json
 STATUS_DIR=${RUNTIME_DIRECTORY:-/run/signage-kiosk}
-DEMO_GRAPHIC=/packages/demo-lower-third/demo-lower-third.ograf.json
 if [[ -n ${SIGNAGE_URL:-} ]]; then
     URL=$SIGNAGE_URL
-elif [[ $(jq -r '.demo // false' /run/signage/player.json 2>/dev/null) == true ]]; then
-    # [player] demo = true: the OGraf host page with the demo lower third.
-    URL="http://127.0.0.1:8080/host/?graphic=$DEMO_GRAPHIC"
 else
-    URL=file://$STATUS_DIR/status.html
+    # The player page plays the dashboard's program (/content.json) and
+    # shows the status screen when there's nothing to play. [player]
+    # demo = true makes it play the demo lower third instead of the status
+    # screen while no program is assigned.
+    URL=http://127.0.0.1:8080/player/
+    if [[ $(jq -r '.demo // false' /run/signage/player.json 2>/dev/null) == true ]]; then
+        URL+="?demo=1"
+    fi
 fi
 
 apply_display() {
@@ -60,8 +63,9 @@ dashboard_status() {
     dash=$(sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$dash")
 }
 
-# Device status, as status.json (the host page's corner overlay reads it
-# through signage-web) and as a plain status page for non-demo mode.
+# Device status, as status.json (the player's status screen and the host
+# page's overlay read it through signage-web) and as a plain status page
+# (file://, for SIGNAGE_URL or when signage-web is down).
 write_status() {
     local tmp version addrs clock ntp config display dash dashcls
     . /usr/lib/os-release

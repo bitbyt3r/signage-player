@@ -39,8 +39,9 @@ rotation = 0
 # scale = 1.0
 
 [player]
-# Show the built-in demo graphic (an OGraf lower third) instead of the plain
-# status page. Until the real player exists, this is a preview of it.
+# The player plays whatever program the dashboard assigns. With no program
+# (or no dashboard), it shows a status screen; demo = true shows the
+# built-in demo graphic (an OGraf lower third) instead.
 demo = false
 
 [install]

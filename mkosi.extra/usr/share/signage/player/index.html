@@ -1,0 +1,42 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="icon" href="data:,">
+<title>signage player</title>
+<!--
+  The signage player: plays the dashboard's program from /content.json
+  (written by the dashboard agent) with one full-screen layer per program
+  layer, and shows the device status screen when there is nothing to play.
+  See docs/player.md.
+
+  Parameters: demo=1     play the demo lower third when no program is assigned
+              status=0   never show the status screen (black instead)
+-->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; cursor: none; background: #000; }
+  body { font-family: "DejaVu Sans", sans-serif; color: #e8eef2; }
+  #layers > div { position: absolute; inset: 0; background: transparent; overflow: hidden; }
+  #layers > div > * { position: absolute; inset: 0; }
+
+  #status { position: absolute; inset: 0; z-index: 1000000; display: grid; place-content: center;
+            background: #101418; font-size: 2vw; line-height: 1.35; }
+  #status[hidden] { display: none; }
+  #status h1 { font-size: 4vw; margin: 0 0 .4em; font-weight: bold; }
+  #status dl { display: grid; grid-template-columns: auto 1fr; gap: .45em 1.2em; margin: 0; }
+  #status dt { color: #8aa0b0; }
+  #status dd { margin: 0; }
+  #status code { font-size: 1.6vw; }
+  #status .note { color: #8aa0b0; font-size: 1.6vw; margin-top: 1em; }
+  .ok { color: #8be08b; } .warn { color: #ffc266; } .dim { color: #8a949c; } .err { color: #ff8a80; }
+
+  #update { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2000000; height: 3.2vw;
+            background: rgba(0, 0, 0, 0.7); font-size: 1.5vw; }
+  #update[hidden] { display: none; }
+  #update .fill { position: absolute; inset: 0 auto 0 0; background: #2f7fd0; transition: width 1s linear; }
+  #update.failed .fill { background: #b03a2e; }
+  #update .label { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 1.5vw;
+                   text-shadow: 0 0 0.3vw #000; }
+</style>
+<div id="layers"></div>
+<div id="status" hidden></div>
+<div id="update" hidden><div class="fill"></div><div class="label"></div></div>
+<script type="module" src="player.mjs"></script>

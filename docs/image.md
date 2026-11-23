@@ -33,20 +33,23 @@ DHCP at route metric 100, each WiFi network at 600, so wired wins when
 plugged in) and chrony sources, and writes `/run/signage/display.json`.
 `signage-player.service` runs cage on tty1 as the `signage` user; `kiosk`
 applies resolution/rotation with `wlr-randr` and starts Firefox ESR in kiosk
-mode. Until the player exists it shows a status page.
+mode on `http://127.0.0.1:8080/player/`, the player page (served by
+`signage-web.service`, since Firefox won't import ES modules over
+`file://`). It plays the program the dashboard assigned, from
+`/var/lib/signage/content.json`, and shows a status screen when there is
+nothing to play. See [player.md](player.md).
 
-**Demo graphic.** With `[player] demo = true` in `config.toml`, the kiosk
-opens `/usr/share/signage/host/` (served on `http://127.0.0.1:8080` by
-`signage-web.service`, since Firefox won't import ES modules over `file://`)
-instead of the plain status page. The host page is a minimal OGraf renderer:
-it loads the manifest named by `?graphic=`, mounts the graphic on a
-transparent full-screen layer and loops play (hold 6 s), stop, pause 2 s, with
-the device status in a corner overlay. The demo graphic is
-`packages/demo-lower-third/`, baked into `/usr/share/signage/packages/`.
+**Demo graphic.** With `[player] demo = true` in `config.toml`, the player
+plays the demo lower third (`packages/demo-lower-third/`, baked into
+`/usr/share/signage/packages/`) instead of the status screen while no
+program is assigned. `/usr/share/signage/host/` is a minimal OGraf preview
+page: it loads the manifest named by `?graphic=` and loops play (hold 6 s),
+stop, pause 2 s, with the device status in a corner overlay.
 
 **Updates.** `systemd-sysupdate` (from `systemd-container`) with `/usr/lib/sysupdate.d/` pulls new `/usr` + verity + UKI from the
 latest GitHub release into the B slot; the UKI gets 3 boot tries before
-systemd-boot falls back. Not yet tested.
+systemd-boot falls back. Tested end to end in QEMU (A → B, see
+[player.md](player.md) for the on-screen progress bar).
 
 ## Building
 

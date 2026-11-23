@@ -1,7 +1,8 @@
 // Minimal OGraf host: see index.html for the parameters.
+import { esc, getJson, dashboardLine, startUpdateBar } from "../player/status.mjs";
+
 const params = new URLSearchParams(location.search);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const statusEl = document.getElementById("status");
 let hostError = "";
 
@@ -9,57 +10,7 @@ function log(...args) { console.log("[host]", ...args); }
 
 // ------------------------------------------------------------ status overlay
 
-async function getJson(path) {
-    try {
-        const r = await fetch(path, { cache: "no-store" });
-        if (r.ok) return await r.json();
-    } catch { /* not written yet */ }
-    return null;
-}
-
-const ago = (ms) => {
-    const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-    return s < 90 ? `${s} s` : s < 5400 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`;
-};
-const hhmm = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-
-// The dashboard agent's /run/signage/agent.json, as one coloured line.
-function dashboardLine(a) {
-    let cls = "dim", text = "not configured";
-    if (a && a.state === "connected") {
-        cls = "ok"; text = `connected · checked in ${ago(a.last_ok || a.last_attempt)} ago`;
-    } else if (a && a.state !== "unconfigured") {
-        cls = "warn";
-        text = a.last_ok ? `offline since ${hhmm(a.last_ok)}` : "connecting";
-        if (a.error) text += ` — ${a.error}`;
-    } else if (!a) {
-        text = "agent not running";
-    }
-    return `<span class="k">Dashboard</span> <span class="${cls}">${esc(text)}</span>`;
-}
-
-// ------------------------------------------------------------ update bar
-
-// The agent writes /run/signage/update.json while sysupdate runs. Show a
-// full-width bar until it's done; a failure stays up for a minute.
-const updateEl = document.getElementById("update");
-async function refreshUpdate() {
-    const u = await getJson("/status/update.json");
-    let show = u && u.state && u.state !== "done";
-    if (show && u.state === "failed") show = Date.now() - (u.updated || 0) < 60000;
-    updateEl.hidden = !show;
-    if (!show) return;
-    const pct = Math.max(0, Math.min(100, Number(u.percent) || 0));
-    const v = u.version ? ` to v${u.version}` : "";
-    const label = u.state === "failed" ? `Update${v} failed: ${u.message || "unknown error"}`
-        : u.state === "rebooting" ? `Updated${v}, rebooting…`
-        : `Updating${v}… ${pct}%`;
-    updateEl.className = u.state === "failed" ? "failed" : "";
-    updateEl.querySelector(".fill").style.width = `${u.state === "failed" ? 100 : pct}%`;
-    updateEl.querySelector(".label").textContent = label;
-}
-refreshUpdate();
-setInterval(refreshUpdate, 2000);
+startUpdateBar(document.getElementById("update"));
 
 async function refreshStatus() {
     let s = {};
