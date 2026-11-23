@@ -30,7 +30,7 @@ STATIC = Path(__file__).parent / "static"
 WS_URL = os.environ.get("WS_URL", "")
 ENROLL_TOKEN = os.environ.get("ENROLL_TOKEN", "")
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 MIRROR_FUNCTION = os.environ.get("MIRROR_FUNCTION", "")
 
 POLL = 15          # normal check-in interval, seconds

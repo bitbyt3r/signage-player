@@ -19,9 +19,8 @@ Parameters:
     Description: owner/repo whose releases hold install images, e.g. bitbyt3r/signage-player. Blank disables image export.
   GitHubToken:
     Type: String
-    NoEcho: true
     Default: ""
-    Description: Fine-grained GitHub token with read access to Contents of GitHubRepo (needed for a private repo).
+    Description: Optional GitHub token (press Enter to skip). Only needed for a private repo or to lift the anonymous API rate limit.
 
 Globals:
   Function:

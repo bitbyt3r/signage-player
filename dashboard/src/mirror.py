@@ -24,7 +24,7 @@ import uuid
 import common as c
 
 GITHUB_REPO = os.environ.get("GITHUB_REPO", "")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 PART = 64 * 1024 * 1024
 CHUNK = 1024 * 1024
 CONFIG_TYPE = "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"
