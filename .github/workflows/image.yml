@@ -50,12 +50,15 @@ jobs:
           cd mkosi.output && sudo chown -R "$USER" .
           V=${{ steps.v.outputs.version }}; mkdir ../dist
           xz -T0 -6 -c signage_$V.raw >../dist/signage_$V.raw.xz
-          # sysupdate.d expects signage_<version>.<partition>.<partuuid>.raw.zst:
+          # sysupdate.d expects signage_<version>.<partition>.<partuuid>.raw.xz
+          # (not zstd: systemd-pull 257 doesn't decompress it when writing
+          # into a partition, and the erofs is already lzma, so xz barely
+          # shrinks it anyway):
           # the UKI's usrhash= finds /usr and its verity partition by UUID, so
           # updates must recreate them with the same UUIDs.
           uuid() { sfdisk -J signage_$V.raw | jq -r --arg n "$1" '.partitiontable.partitions[] | select(.name == $n) | .uuid | ascii_downcase'; }
-          zstd -19 -T0 -q signage_$V.usr-x86-64.raw -o ../dist/signage_$V.usr-x86-64.$(uuid signage_usr_$V).raw.zst
-          zstd -19 -T0 -q signage_$V.usr-x86-64-verity.raw -o ../dist/signage_$V.usr-x86-64-verity.$(uuid signage_verity_$V).raw.zst
+          xz -T0 -6 -c signage_$V.usr-x86-64.raw >../dist/signage_$V.usr-x86-64.$(uuid signage_usr_$V).raw.xz
+          xz -T0 -6 -c signage_$V.usr-x86-64-verity.raw >../dist/signage_$V.usr-x86-64-verity.$(uuid signage_verity_$V).raw.xz
           cp signage_$V.efi ../dist/
           cd ../dist && sha256sum * >SHA256SUMS
       - name: Sign SHA256SUMS
@@ -73,7 +76,7 @@ jobs:
           rm -rf "$GNUPGHOME"
       - run: ls -lh dist
       # The download artifact is just the stick image (already xz, so no zip
-      # compression). The sysupdate payloads (usr/verity .zst, UKI, SHA256SUMS
+      # compression). The sysupdate payloads (usr/verity .raw.xz, UKI, SHA256SUMS
       # and its signature) only go to GitHub releases, below.
       - uses: actions/upload-artifact@v4
         with:

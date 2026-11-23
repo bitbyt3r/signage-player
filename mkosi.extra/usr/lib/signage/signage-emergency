@@ -1,0 +1,9 @@
+#!/bin/bash
+# Replaces the emergency shell (see emergency.service.d/signage-reboot.conf):
+# show which units failed on tty1 and wait 30 s; the unit then reboots.
+failed=$(systemctl --failed --no-legend --plain 2>/dev/null | while read -r unit _; do printf '%s ' "$unit"; done)
+printf '\n  Boot failed: %s\n  Restarting in 30 s.\n' "${failed:-unknown}" >/dev/tty1 2>/dev/null
+# Builtin-only wait (the initrd may not have sleep).
+exec {fd}<> <(:)
+read -r -t 30 -u "$fd" _
+exit 0

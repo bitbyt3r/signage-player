@@ -9,7 +9,9 @@ Verify=yes
 [Source]
 Type=url-file
 Path=https://github.com/bitbyt3r/signage-player/releases/latest/download/
-MatchPattern=signage_@v.usr-x86-64.@u.raw.zst
+# xz, not zstd: systemd-pull 257 writes .zst downloads into the partition
+# still compressed (it only decompresses xz, gzip and bzip2 there).
+MatchPattern=signage_@v.usr-x86-64.@u.raw.xz
 
 [Target]
 Type=partition

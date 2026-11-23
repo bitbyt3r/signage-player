@@ -91,7 +91,7 @@ removed so it doesn't sit on the ESP.
 | Stick image, allocated | ~1.4 GB | 434 MB |
 | ESP | 69 MB | 58 MB |
 | `raw.xz` download | 425 MB | 411 MiB |
-| `usr…raw.zst` (update) | 365 MB | 352 MiB |
+| `usr…raw.xz` (update; was `.zst`) | 365 MB | ~352 MiB |
 
 zstd decompresses faster than lzma, but compressed data doesn't recompress,
 so zstd in erofs made the downloads about 60 MiB bigger; lzma is smaller on
