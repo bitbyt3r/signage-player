@@ -705,7 +705,38 @@ async function viewProgram(id) {
         it.days = [...s].sort();
       } }), dname)));
     it._read = readData;
-    const el = h("div", { class: "item" },
+    // Collapsed: one line that says what plays, for how long and when.
+    const sumText = h("span", { class: "item-sum" });
+    const describe = () => {
+      readData();
+      const pkg = pkgById[pkgSel.value];
+      const bits = [];
+      if (it.version) bits.push(`pinned ${it.version}`);
+      const d = Number(it.duration ?? 30);
+      bits.push(d ? `${d}s` : "until replaced");
+      const days = (it.days || []).length;
+      if (days && days < 7) bits.push(it.days.map((i) => DAYS[i]).join(" "));
+      if (it.start || it.end) bits.push(`${it.start || "00:00"}–${it.end || "24:00"}`);
+      if (it.from || it.until) bits.push(`${(it.from || "").replace("T", " ") || "…"} to ${(it.until || "").replace("T", " ") || "…"}`);
+      const schema = verSchema();
+      for (const [k, ps] of Object.entries(schema?.properties || {})) {
+        const v = it.data?.[k];
+        if (ps["x-signage-options"] && Array.isArray(v) && v.length) bits.push(`${ps.title || k}: ${v.join(", ")}`);
+        else if (ps["x-signage-options"] && typeof v === "string" && v) bits.push(`${ps.title || k}: ${v}`);
+      }
+      sumText.replaceChildren(
+        h("strong", {}, it.label || pkg?.name || pkgSel.value || "Choose a graphic"),
+        it.label && pkg ? h("span", { class: "muted" }, ` ${pkg.name}`) : "",
+        h("span", { class: "muted small" }, ` · ${bits.join(" · ")}`));
+    };
+    const stop = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
+    const el = h("details", { class: "item", open: !!it._open, ontoggle: () => { it._open = el.open; } },
+      h("summary", {}, sumText,
+        h("span", { class: "item-tools" },
+          h("button", { type: "button", class: "small ghost", title: "Move up", onclick: stop(() => move(layer.items, it, -1)) }, "↑"),
+          h("button", { type: "button", class: "small ghost", title: "Move down", onclick: stop(() => move(layer.items, it, 1)) }, "↓"),
+          h("button", { type: "button", class: "small ghost danger", title: "Remove", onclick: stop(() => { layer.items.splice(layer.items.indexOf(it), 1); render(); }) }, "Remove"))),
+      h("div", { class: "item-body" },
       h("div", { class: "fields" },
         h("label", { class: "field" }, h("span", {}, "Graphic package"), pkgSel),
         h("label", { class: "field" }, h("span", {}, "Version"), verSel),
@@ -722,10 +753,12 @@ async function viewProgram(id) {
       dataBox,
       h("div", { class: "row" },
         jsonToggle,
-        h("button", { type: "button", class: "small", onclick: fillDefaults }, "Fill missing defaults"),
-        h("button", { type: "button", class: "small", onclick: () => move(layer.items, it, -1) }, "↑"),
-        h("button", { type: "button", class: "small", onclick: () => move(layer.items, it, 1) }, "↓"),
-        h("button", { type: "button", class: "small danger", onclick: () => { layer.items.splice(layer.items.indexOf(it), 1); render(); } }, "Remove")));
+        h("button", { type: "button", class: "small", onclick: fillDefaults }, "Fill missing defaults"))));
+    el.addEventListener("change", () => setTimeout(describe));
+    el.addEventListener("input", (e) => { if (e.target === label || e.target === dur) setTimeout(describe); });
+    label.addEventListener("input", (e) => (it.label = e.target.value));
+    dur.addEventListener("input", (e) => (it.duration = Number(e.target.value)));
+    describe();
     return el;
   }
 
@@ -746,7 +779,7 @@ async function viewProgram(id) {
         h("button", { type: "button", class: "small danger", onclick: () => { p.layers.splice(p.layers.indexOf(layer), 1); render(); } }, "Remove layer")),
       layer.items.length ? null : h("p", { class: "muted small" }, "No graphics on this layer yet."),
       layer.items.map((it) => itemEditor(it, layer)),
-      h("button", { type: "button", class: "small", style: "margin-top:10px", onclick: () => { layer.items.push({ package: "", version: "", duration: 30, data: {} }); render(); } }, "Add graphic"))));
+      h("button", { type: "button", class: "small", style: "margin-top:10px", onclick: () => { layer.items.push({ package: "", version: "", duration: 30, data: {}, _open: true }); render(); } }, "Add graphic"))));
   }
 
   function syncData() {
@@ -762,7 +795,7 @@ async function viewProgram(id) {
     p.layers.forEach((l) => l.items.forEach((it) => delete it._dataError));
     if (bad) return err.replaceChildren(h("div", { class: "bad" }, "One of the graphic data boxes isn't valid JSON."));
     const body = { name: name.value, description: desc.value, layers: p.layers.map((l) => ({
-      name: l.name, layer: l.layer, items: l.items.map(({ _read, _dataError, ...rest }) => rest) })) };
+      name: l.name, layer: l.layer, items: l.items.map(({ _read, _dataError, _open, ...rest }) => rest) })) };
     try {
       const saved = id === "new" ? await api("POST", "/api/programs", body) : await api("PUT", `/api/programs/${id}`, body);
       toast("Program saved; devices pick it up at their next check-in");
@@ -779,6 +812,8 @@ async function viewProgram(id) {
       h("label", { class: "field" }, h("span", {}, "Description"), desc))),
     layersBox,
     h("div", { class: "row" },
+      h("button", { type: "button", class: "ghost", onclick: () => { syncData(); p.layers.forEach((l) => l.items.forEach((x) => (x._open = true))); render(); } }, "Expand all"),
+      h("button", { type: "button", class: "ghost", onclick: () => { syncData(); p.layers.forEach((l) => l.items.forEach((x) => (x._open = false))); render(); } }, "Collapse all"),
       h("button", { type: "button", onclick: () => { p.layers.push({ name: `Layer ${p.layers.length + 1}`, layer: 10 * (p.layers.length + 1), items: [] }); render(); } }, "Add layer"),
       h("button", { class: "primary", onclick: save }, "Save program"),
       id !== "new" ? h("button", { class: "danger", onclick: async () => {
