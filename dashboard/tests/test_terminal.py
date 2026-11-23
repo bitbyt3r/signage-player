@@ -29,12 +29,16 @@ def test_terminal_session_round_trip():
     async def relay(ws):
         got["path"] = ws.request.path
         await ws.send(json.dumps({"t": "r", "cols": 100, "rows": 30}))
-        await ws.send(json.dumps({"t": "i", "d": "stty size; echo hi-$((40+2))\n"}))
-        out = b""
-        while b"hi-42" not in out:
+        # Input frames arrive out of order; the agent must put them back.
+        await ws.send(json.dumps({"t": "i", "s": 1, "d": "echo hi-$((40+2))\n"}))
+        await ws.send(json.dumps({"t": "i", "s": 0, "d": "stty size; "}))
+        frames = {}
+        while b"hi-42" not in b"".join(frames[k] for k in sorted(frames)):
             m = json.loads(await asyncio.wait_for(ws.recv(), 10))
             if m["t"] == "o":
-                out += base64.b64decode(m["d"])
+                frames[m["s"]] = base64.b64decode(m["d"])
+        assert sorted(frames) == list(range(len(frames)))
+        out = b"".join(frames[k] for k in sorted(frames))
         got["out"] = out
         await ws.send(json.dumps({"t": "i", "d": "exit\n"}))
         try:
@@ -65,3 +69,16 @@ def test_terminal_session_round_trip():
     assert result.get("r") == "terminal closed"
     assert got["path"] == "/prod?session=abc&role=device&token=tok"
     assert b"30 100" in got["out"] and b"hi-42" in got["out"]
+
+
+def test_reorder_skips_lost_frames(monkeypatch):
+    agent = load_agent()
+    r = agent.Reorder()
+    assert r.push(1, "b") == []
+    assert r.push(0, "a") == ["a", "b"]
+    assert r.push(0, "dup") == []
+    t = [100.0]
+    monkeypatch.setattr(agent.time, "monotonic", lambda: t[0])
+    assert r.push(3, "d") == []      # frame 2 lost
+    t[0] += 2
+    assert r.push(4, "e") == ["d", "e"]

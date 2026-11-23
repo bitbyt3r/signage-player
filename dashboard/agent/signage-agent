@@ -437,6 +437,35 @@ class WebSocket:
             pass
 
 
+class Reorder:
+    """Puts sequence-numbered messages back in order. The relay runs one
+    Lambda per WebSocket message, concurrently, so frames can overtake each
+    other. A gap that lasts more than a second (a lost frame) is skipped."""
+
+    def __init__(self):
+        self.next = 0
+        self.pending = {}
+        self.since = None
+
+    def push(self, seq, item):
+        out = []
+        if seq < self.next:
+            return out
+        self.pending[seq] = item
+        while self.next in self.pending:
+            out.append(self.pending.pop(self.next))
+            self.next += 1
+        if self.pending:
+            self.since = self.since or time.monotonic()
+            if time.monotonic() - self.since > 1:
+                self.next = min(self.pending)
+                self.since = None
+                out += self.push(self.next, self.pending.pop(self.next))
+        else:
+            self.since = None
+        return out
+
+
 def terminal_session(args):
     url = args["ws_url"] + "?" + urllib.parse.urlencode(
         {"session": args["session"], "role": "device", "token": args["token"]})
@@ -455,6 +484,7 @@ def terminal_session(args):
     done = threading.Event()
 
     def pump_out():
+        seq = 0
         try:
             while not done.is_set():
                 r, _, _ = select.select([fd], [], [], 1)
@@ -466,7 +496,17 @@ def terminal_session(args):
                     break
                 if not data:
                     break
-                ws.send(json.dumps({"t": "o", "d": base64.b64encode(data).decode()}))
+                # Coalesce bursts (a command's output, a prompt) into one frame.
+                while len(data) < 16384 and select.select([fd], [], [], 0.015)[0]:
+                    try:
+                        more = os.read(fd, 16384 - len(data))
+                    except OSError:
+                        more = b""
+                    if not more:
+                        break
+                    data += more
+                ws.send(json.dumps({"t": "o", "s": seq, "d": base64.b64encode(data).decode()}))
+                seq += 1
         except OSError:
             pass
         done.set()
@@ -481,6 +521,7 @@ def terminal_session(args):
 
     threading.Thread(target=pump_out, daemon=True).start()
     threading.Thread(target=keepalive, daemon=True).start()
+    inbox = Reorder()
     try:
         while not done.is_set():
             msg = ws.recv()
@@ -491,7 +532,11 @@ def terminal_session(args):
             except ValueError:
                 continue
             if m.get("t") == "i":
-                os.write(fd, m.get("d", "").encode())
+                if isinstance(m.get("s"), int):
+                    for d in inbox.push(m["s"], m.get("d", "")):
+                        os.write(fd, d.encode())
+                else:
+                    os.write(fd, m.get("d", "").encode())
             elif m.get("t") == "r":
                 import fcntl
                 import termios
@@ -833,7 +878,11 @@ class Agent:
                         run(["systemctl", "reboot"])
                     return
                 continue  # report the result first, then reboot
-            delay = self.poll if not self.failures else min(60, 5 * self.failures)
+            # Retry quickly while offline: right after boot the first attempts
+            # often fail (link coming up, clock not yet stepped by NTP so TLS
+            # rejects certificates), and a long backoff delays the first
+            # check-in by minutes.
+            delay = self.poll if not self.failures else min(15, 3 * self.failures)
             self.wake.wait(delay)
             self.wake.clear()
 

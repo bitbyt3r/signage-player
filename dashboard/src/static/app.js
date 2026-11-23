@@ -452,16 +452,27 @@ async function openTerminal(id, box) {
   ws = new WebSocket(`${s.ws_url}?session=${s.session}&role=admin&token=${encodeURIComponent(s.token)}`);
   const send = (o) => ws.readyState === 1 && ws.send(JSON.stringify(o));
   const dec = (b64) => Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0));
+  // The relay runs one Lambda per frame, concurrently, so frames can arrive
+  // out of order. Both ends number their frames and put them back in order;
+  // a gap lasting over a second (a lost frame) is skipped.
+  let outNext = 0, outPending = new Map(), gapTimer = null, inSeq = 0;
+  const flushOut = () => {
+    while (outPending.has(outNext)) { term.write(outPending.get(outNext)); outPending.delete(outNext); outNext++; }
+    clearTimeout(gapTimer);
+    if (outPending.size) gapTimer = setTimeout(() => { outNext = Math.min(...outPending.keys()); flushOut(); }, 1000);
+  };
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
-    if (m.t === "o") term.write(dec(m.d));
-    else if (m.t === "ready") { status.textContent = "Connected (root shell)"; send({ t: "r", cols: term.cols, rows: term.rows }); term.focus(); }
-    else if (m.t === "closed") { status.textContent = "Session ended"; term.write("\r\n[session ended]\r\n"); }
+    if (m.t === "o" && typeof m.s === "number") { if (m.s >= outNext) { outPending.set(m.s, dec(m.d)); flushOut(); } }
+    else if (m.t === "o") term.write(dec(m.d));
+    else if (m.t === "ready") { if (!ready) { ready = true; inSeq = 0; } status.textContent = "Connected (root shell)"; send({ t: "r", cols: term.cols, rows: term.rows }); term.focus(); }
+    else if (m.t === "closed") { ready = false; status.textContent = "Session ended"; term.write("\r\n[session ended]\r\n"); }
     else if (m.t === "waiting") status.textContent = "Still waiting for the device…";
   };
   ws.onopen = () => send({ t: "hello" });
   ws.onclose = () => { if (!status.textContent.startsWith("Session")) status.textContent = "Disconnected"; };
-  term.onData((d) => send({ t: "i", d }));
+  let ready = false;
+  term.onData((d) => ready && send({ t: "i", s: inSeq++, d }));
   term.onResize(({ cols, rows }) => send({ t: "r", cols, rows }));
   const onResize = () => fit.fit();
   window.addEventListener("resize", onResize);
