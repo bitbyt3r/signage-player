@@ -339,42 +339,48 @@ A quick look at how the player renders:
 
 ### signage-profile [SECONDS]
 
-Records a Firefox profile of the player (default 30 s), to see where frame
-time goes:
+Records a Firefox profile of the running player (default 30 s), to see
+where frame time goes. Firefox isn't restarted:
 
-1. It writes `/run/signage/profile.env` with `MOZ_PROFILER_STARTUP=1`,
-   the `graphics` preset, a 16M-entry buffer and `MOZ_UPLOAD_DIR`, and
-   restarts `signage-player.service`. The kiosk sources that file before
-   it starts Firefox. The script deletes it as soon as Firefox is running,
-   so later restarts are normal.
-2. After SECONDS it sends Firefox **SIGUSR2**, which makes the Gecko
-   profiler write the parent and every child process's profile to
-   `MOZ_UPLOAD_DIR` while Firefox keeps running. (A shutdown profile via
-   `MOZ_PROFILER_SHUTDOWN` doesn't work here: Firefox ESR exits on SIGTERM
-   without writing it.)
-3. It restarts the player without the profiler, gzips the profile to
-   `/var/lib/signage/profiles/profile-<host>-<YYYYmmddTHHMMSSZ>.json.gz`,
-   keeps the newest 5 (never deleting the new one) and prints the path and
-   size.
+1. The kiosk always starts Firefox with `MOZ_UPLOAD_DIR=/var/lib/signage/profiles/.dump`.
+   That costs nothing: the profiler isn't running.
+2. signage-profile sends the player's Firefox **SIGUSR1**, which starts the
+   Gecko profiler, waits SECONDS, then sends **SIGUSR2**, which stops it,
+   gathers the parent and every child process (the page itself runs in a
+   content process) and writes `profile_0_<pid>.json` to `MOZ_UPLOAD_DIR`.
+3. Once that file is complete JSON it is gzipped to
+   `/var/lib/signage/profiles/profile-<host>-<YYYYmmddTHHMMSSZ>.json.gz`;
+   the newest 5 are kept (never deleting the new one) and the path, size
+   and number of content processes are printed. It warns if no content
+   process made it into the profile.
+
+Firefox ESR 153 starts the signal profiler with fixed settings and ignores
+`MOZ_PROFILER_STARTUP_*`: features js, stackwalk and cpu, all threads,
+1 ms interval, 64M-entry buffer. In particular there are no screenshots
+(the `graphics` preset used before captured a full 4K frame per composite,
+which cost GPU time itself and skewed the result).
 
 It exits 0 only when a complete profile was written, and otherwise exits
-non-zero saying why ("NO PROFILE WRITTEN: ..."). The dashboard agent relies
-on that when it runs it for the dashboard's GPU profile button and uploads
-the file. To read it, open https://profiler.firefox.com and choose "Load a
-profile from file". The `.json.gz` loads as is.
+non-zero saying why (Firefox not running, Firefox started by an older kiosk
+without `MOZ_UPLOAD_DIR`: restart the player once, or "NO PROFILE WRITTEN:
+..."). The dashboard agent relies on that when it runs it for the
+dashboard's GPU profile button and uploads the file. To read it, open
+https://profiler.firefox.com and choose "Load a profile from file". The
+`.json.gz` loads as is.
 
 In the profile, check the renderer and compositor threads (`Renderer`,
 `WRRenderBackend`, `WRSceneBuilder`) for how long each frame takes to draw,
-and the content process's main thread for script and layout work. Expect
-the player to drop to a lower frame rate while profiling.
+and the content process's `GeckoMain` (the tab whose name is the player's
+URL origin) for script, style and layout work.
 
-Checked in Firefox ESR 153 headless, with a stand-in `systemctl` and the
-test overrides `SIGNAGE_PROFILE_USER`, `SIGNAGE_PROFILE_DIR` and
-`SIGNAGE_PROFILE_ENV`. A 10 s run exited 0 in 14 s with a 5 MB
-`.json.gz` (valid JSON: 7 threads plus 10 child processes). It pruned 6
-older files down to 4 plus the new one, removed `profile.env`, and the
-player came back without the profiler. With a player that never starts,
-it exited 1 with a clear message and left no file.
+Checked in Firefox ESR 153 headless on a page with a JS-heavy
+requestAnimationFrame loop, with the test overrides `SIGNAGE_PROFILE_USER`
+and `SIGNAGE_PROFILE_DIR`. An 8 s run exited 0 in 10 s with a 6.6 MB
+`.json.gz` holding 7 content processes, the page's own JS function and no
+screenshots; a second run against the same Firefox worked too. It pruned 6
+older files down to 4 plus the new one. With no Firefox running, or a
+`MOZ_UPLOAD_DIR` other than `<dir>/.dump`, it exited 1 with a clear
+message and left no file.
 
 ## Testing
 
