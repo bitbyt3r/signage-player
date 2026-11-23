@@ -184,7 +184,13 @@ MakeDirectories=/usr /var /home /srv /root /tmp /mnt /efi /boot /proc /sys /dev 
 CONF
 
 say "Writing partitions..."
-systemd-repart --dry-run=no --empty=force --definitions="$DEFS" "$TARGET"
+# No discard: BLKDISCARD over the whole root partition took minutes on some
+# disks. --discard=no also makes systemd-repart (257) run mkfs.ext4 with
+# "-E nodiscard,lazy_itable_init=1"; lazy_journal_init skips zeroing the
+# journal too. The kernel finishes the inode tables in the background after
+# first boot, and fstrim.timer trims free space weekly.
+SYSTEMD_REPART_MKFS_OPTIONS_EXT4="-E lazy_journal_init=1" \
+    systemd-repart --dry-run=no --empty=force --discard=no --definitions="$DEFS" "$TARGET"
 udevadm settle
 
 # Secure Boot: queue our certificates for MOK enrollment unless shim already

@@ -21,7 +21,7 @@ python3 "$SRCDIR/scripts/trim-image.py" /
 
 systemd-sysusers
 systemctl enable signage-config.service signage-install.service signage-player.service signage-web.service signage-agent.service
-systemctl enable NetworkManager.service chrony.service
+systemctl enable NetworkManager.service chrony.service fstrim.timer
 systemctl set-default multi-user.target
 # The kiosk owns tty1; the installer prints there too.
 systemctl mask getty@tty1.service
