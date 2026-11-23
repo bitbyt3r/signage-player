@@ -443,10 +443,15 @@ def terminal_session(args):
     ws = WebSocket(url)
     pid, fd = pty.fork()
     if pid == 0:
-        os.chdir("/root" if os.path.isdir("/root") else "/")
-        env = {"TERM": "xterm-256color", "HOME": "/root", "USER": "root", "LANG": "C.UTF-8",
-               "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
-        os.execve("/bin/bash", ["bash", "-l"], env)
+        try:
+            pw = pwd.getpwuid(os.getuid())
+            home = pw.pw_dir if os.access(pw.pw_dir, os.X_OK) else "/"
+            os.chdir(home)
+            env = {"TERM": "xterm-256color", "HOME": home, "USER": pw.pw_name, "LANG": "C.UTF-8",
+                   "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"}
+            os.execve("/bin/bash", ["bash", "-l"], env)
+        finally:
+            os._exit(127)
     done = threading.Event()
 
     def pump_out():
