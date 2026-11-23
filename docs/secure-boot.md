@@ -82,10 +82,13 @@ Per machine, once. On the M715q the BIOS is F1 at power-on.
    our certificates the machine doesn't trust yet (normally the backup, plus
    the production one if Secure Boot was off). The password is
    `install.mok_password` in `config.toml` (default `signage`). It then
-   reboots after 30 s instead of 10 and says so on screen.
+   reboots after 30 s instead of 10 and says so on screen. It also sets
+   shim's `MokTimeout` to 60 s (`mokutil --timeout`) so the MokManager
+   prompts on that machine wait a minute instead of 10 s.
 4. **First boot from the disk.** MokManager shows again because of that
    request:
-   - "Press any key to perform MOK management" → press a key within 10 s
+   - "Press any key to perform MOK management" → press a key within 60 s
+     (the installer sets `MokTimeout` to 60; shim's default is 10)
    - **Enroll MOK** → (View key 0/1 to check) **Continue** → **Yes** → type
      the password → **Reboot**
 
@@ -110,6 +113,51 @@ the password state (`authentication/*`: is_enabled, role, mechanism) and
 every setting with its current and possible values. It changes nothing; the
 report is for deciding which settings to script later. Booting the stick and
 pressing a key to cancel the countdown still writes the report.
+
+## Troubleshooting
+
+**"Verification failed: (0x1A) Security Violation" on a black/text screen,
+then an OK box.** That's shim. The firmware accepted shim (Microsoft-signed)
+and shim refused systemd-boot because our signing key isn't enrolled on this
+machine yet. Expected on the first boot of every new machine and for any
+build signed with a key the machine doesn't trust (a dev build on a player
+enrolled with the production key, for example). Press Enter on **OK**, then
+press a key at "Press any key to perform MOK management" and do the
+[step 2](#setting-up-a-player) enrollment. Pick the certificate that matches
+the build: `magfest-signage-mok-2026.cer` for CI/release builds,
+`build-signing.cer` for a local or pull-request build. On a machine our
+installer hasn't run on, that prompt lasts 10 s (shim's default); if it
+goes past, the firmware moves on to the next boot option. Power off and try
+again.
+
+**A firmware screen instead (Lenovo: "Secure Boot Violation", "Invalid
+signature detected. Check Secure Boot Policy in Setup", or the stick just
+doesn't appear as bootable).** That's the BIOS rejecting shim itself, before
+any of our code runs. Causes and fixes, most likely first:
+
+- The firmware doesn't trust the Microsoft *third-party* UEFI CA (the one
+  that signs Linux shims, separate from the Windows CA). Some Lenovo models
+  have an "Allow Microsoft 3rd Party UEFI CA" option under Security → Secure
+  Boot; turn it on. Older ThinkCentres like the M715q trust it by default.
+- Custom keys: someone replaced the factory db (Secure Boot mode "Custom")
+  with one lacking the third-party CA. "Restore Factory Keys" under Secure
+  Boot puts the Microsoft keys back.
+- Revocation: not expected. Our shim (Debian 16.1, SBAT `shim,4`) is
+  current for Microsoft's DBX/SBAT revocations and carries signatures from
+  both the 2011 and the 2023 Microsoft UEFI CA, so firmware trusting either
+  accepts it. If a BIOS still refuses it, update the BIOS.
+
+To tell them apart: shim's message is plain text with `(0x1A)` and its own
+OK box; Lenovo's is a full-screen firmware dialog that names Secure Boot
+policy or setup. As a last resort, turn Secure Boot off, install, and turn
+it back on afterwards; the installed system then shows shim's screen and the
+same enrollment works from the disk's ESP.
+
+**The MokManager prompt never shows after install.** The queued request
+is only offered once; if nobody pressed a key it's gone. The production key
+is still enrolled from step 2, so the player boots; to enroll the backup key,
+run `mokutil --import /usr/share/signage/mok/*.cer` on the player and reboot
+with someone at the screen.
 
 ## Rotating to the backup MOK
 

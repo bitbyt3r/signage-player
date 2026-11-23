@@ -215,6 +215,13 @@ mok_enroll() {
     say "  queued for enrollment: $(printf '%s ' "${pending[@]##*/}")"
 }
 MOK_QUEUED=
+# MokManager's "Press any key to perform MOK management" waits MokTimeout
+# seconds (default 10, then the request is dropped). Give whoever is at the
+# screen a minute. Not forever (-1): a player rebooting on its own with a
+# request still queued would sit at MokManager until someone presses a key.
+MOK_TIMEOUT=60
+command -v mokutil >/dev/null && [[ -d /sys/firmware/efi ]] &&
+    { mokutil --timeout "$MOK_TIMEOUT" >/dev/null 2>&1 || say "  could not set the MokManager timeout"; }
 say "Secure Boot: $(mokutil --sb-state 2>/dev/null | head -n1 || echo unknown)"
 mok_enroll || say "  mokutil failed; enroll the certificate from disk in MokManager instead (docs/secure-boot.md)."
 
@@ -236,7 +243,7 @@ say "You can remove the USB stick at any time now."
 if [[ -n $MOK_QUEUED ]]; then
     say ""
     say "ON THE NEXT BOOT a blue MokManager screen asks to enroll the signing key."
-    say "Press a key within 10 s, then: Enroll MOK > Continue > Yes >"
+    say "Press a key within $MOK_TIMEOUT s, then: Enroll MOK > Continue > Yes >"
     say "password (install.mok_password in config.toml) > Reboot."
 fi
 sleep "$WAIT"

@@ -103,4 +103,3 @@ disk and in the release.
 - With the stick still plugged in, the stick and the disk carry identical
   `/usr` partitions (same UUIDs). Both have the same content, so it works,
   but pull the stick after installing.
-- Secure Boot is not set up; the UKI and verity hash are unsigned.
