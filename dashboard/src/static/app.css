@@ -182,3 +182,5 @@ details.preview > summary { cursor: pointer; }
   background: #000; border: 1px solid var(--line); }
 .preview-frame { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: #000; }
 .preview-status { margin-top: 6px; }
+.upload-results { margin: 8px 0 0; padding-left: 18px; }
+.upload-results li { margin: 2px 0; }

@@ -171,7 +171,9 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   player's `/content.json`, `/status/...` and `/packages/...` requests,
   unzipping packages from S3 in the browser.
 - **Packages**: upload an OGraf graphic as a zip (its `*.ograf.json` manifest
-  plus files). Versions are immutable. Programs use the package's *active*
+  plus files), several zips at once, or a bundle (a zip of package zips; the
+  browser opens it and uploads each package on its own). Re-uploading the
+  same files under the same version is a no-op, however they were zipped. Versions are immutable. Programs use the package's *active*
   version unless an item pins one, so *Make active* rolls a version out to
   every device, and switching back rolls it back. Versions that are active
   or pinned can't be deleted.
@@ -190,6 +192,26 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
 - **Terminal**: a root shell on the device, in the browser. The device opens
   the connection when asked (within a few seconds while you have its page
   open), so it works behind NAT. Close it with *Close* or `exit`.
+
+### Uploading packages from a script
+
+`scripts/signage-upload` (Python standard library only) uploads package
+folders, package zips or bundles and makes them active, for publishing a
+graphic straight from where it's being built. Create a token under *Upload
+tokens* on the Packages page (it can list, upload and activate packages, and
+nothing else; revoke it there), then in the repository root:
+
+```sh
+echo '{"url": "https://<dashboard>", "token": "sgu_..."}' > .signage-upload   # git-ignored
+dashboard/scripts/signage-upload path/to/graphic-folder      # zipped for you
+dashboard/scripts/signage-upload bundle.zip a.zip b.zip      # zips and bundles
+dashboard/scripts/signage-upload --no-activate graphic/      # upload, don't roll out
+dashboard/scripts/signage-upload --list
+```
+
+`SIGNAGE_URL` / `SIGNAGE_TOKEN` or `--url` / `--token` work too. The version
+comes from the manifest: bump it with every change, because changed files
+under an existing version are refused (identical files are a no-op).
 
 ## Development
 

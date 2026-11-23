@@ -446,6 +446,46 @@ def test_player_served_for_preview(aws):
     assert "<title>Signage Dashboard</title>" in body and "def " not in body
 
 
+def test_upload_tokens(aws):
+    token = login()
+    assert call("POST", "/api/tokens", {"name": ""}, token)[0] == 400
+    s, t = call("POST", "/api/tokens", {"name": "graphic threads"}, token)
+    assert s == 200 and t["token"].startswith("sgu_") and t["name"] == "graphic threads"
+    up = t["token"]
+    # The token can list, upload, import and activate packages...
+    assert call("GET", "/api/packages", None, up)[0] == 200
+    s, r = upload_package(up, make_zip("1.0.0"))
+    assert s == 200 and r["active_version"] == "1.0.0"
+    s, r = upload_package(up, make_zip("1.1.0"), activate=False)
+    assert r["active_version"] == "1.0.0"
+    assert call("PATCH", "/api/packages/magfest-lower-third", {"active_version": "1.1.0"}, up)[0] == 200
+    # ...and nothing else.
+    for method, path in (("GET", "/api/devices"), ("GET", "/api/tokens"), ("POST", "/api/tokens"),
+                         ("DELETE", "/api/packages/magfest-lower-third"), ("GET", "/api/programs")):
+        assert call(method, path, {}, up)[0] == 401, path
+    assert call("GET", "/api/packages", None, "sgu_wrong")[0] == 401
+    s, lst = call("GET", "/api/tokens", None, token)
+    assert [x["name"] for x in lst["tokens"]] == ["graphic threads"] and lst["tokens"][0]["used"]
+    assert "token" not in lst["tokens"][0]
+    assert call("DELETE", f"/api/tokens/{lst['tokens'][0]['id']}", None, token)[0] == 200
+    assert call("GET", "/api/packages", None, up)[0] == 401
+
+
+def test_reupload_same_files(aws):
+    token = login()
+    upload_package(token, make_zip("1.0.0"))
+    upload_package(token, make_zip("1.1.0"))
+    # The same files zipped again (other timestamps and compression) are the same upload,
+    # and asking to activate it makes it active.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(make_zip("1.0.0"))) as src, zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for n in reversed(src.namelist()):
+            z.writestr(zipfile.ZipInfo(n, (2001, 2, 3, 4, 5, 6)), src.read(n))
+    s, r = upload_package(token, buf.getvalue())
+    assert s == 200 and r["unchanged"] and r["active_version"] == "1.0.0"
+    assert upload_package(token, make_zip("1.0.0", main="other.mjs"))[0] == 409
+
+
 def test_terminal_ws_auth(aws):
     did, tok = enroll()
     token = login()

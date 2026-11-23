@@ -10,3 +10,4 @@ mkosi.signing/
 dist/
 packages/
 .DS_Store
+.signage-upload

@@ -119,6 +119,10 @@ def handler(event, context=None):
                     authz = req.headers.get("authorization", "")
                     if not authz.startswith("Bearer ") or not c.verify(authz[7:], "admin"):
                         raise HttpError(401, "log in again")
+                elif auth == "packages":   # the dashboard, or an upload token (scripts)
+                    authz = req.headers.get("authorization", "")
+                    if not authz.startswith("Bearer ") or not (c.verify(authz[7:], "admin") or api_token(authz[7:])):
+                        raise HttpError(401, "log in again, or check the upload token")
                 elif auth == "device":
                     req.device = device_auth(req)
                 return fn(req, **m.groupdict())
@@ -160,6 +164,56 @@ def login(req):
         time.sleep(1)
         raise HttpError(401, "wrong password")
     return resp(200, {"token": c.sign({"k": "admin"}, SESSION_TTL), "expires_in": SESSION_TTL})
+
+
+# Upload tokens let scripts (scripts/signage-upload) list, upload and activate
+# packages, and nothing else. Only a hash is stored; the token is shown once.
+TOKEN_PREFIX = "sgu_"
+
+
+def api_token(tok):
+    if not tok.startswith(TOKEN_PREFIX) or len(tok) > 100:
+        return None
+    h = c.sha256(tok)
+    item = c.get(f"APITOKEN#{h}")
+    if not item:
+        return None
+    if int(item.get("used", 0)) < c.now() - 300:   # last used, to the nearest few minutes
+        c.update(item["pk"], "META", {"used": c.now()})
+    return item
+
+
+def token_view(item):
+    d = c.loads(item["data"])
+    return {"id": item["pk"].split("#", 1)[1][:12], "name": d["name"], "created": d["created"],
+            "used": int(item.get("used", 0)) or None}
+
+
+@route("GET", "/api/tokens")
+def list_tokens(req):
+    toks = sorted((token_view(i) for i in c.by_kind("apitoken")), key=lambda t: t["created"])
+    return resp(200, {"tokens": toks})
+
+
+@route("POST", "/api/tokens")
+def create_token(req):
+    name = str(req.json().get("name") or "").strip()[:60]
+    if not name:
+        raise HttpError(400, "give the token a name, such as who or what will use it")
+    tok = TOKEN_PREFIX + c.secrets.token_urlsafe(32)
+    item = {"pk": f"APITOKEN#{c.sha256(tok)}", "sk": "META", "kind": "apitoken",
+            "data": c.dumps({"name": name, "created": c.now()})}
+    c.put(item)
+    return resp(200, {**token_view(item), "token": tok})
+
+
+@route("DELETE", "/api/tokens/{tid}")
+def delete_token(req, tid):
+    for i in c.by_kind("apitoken"):
+        if i["pk"].split("#", 1)[1][:12] == tid:
+            c.delete(i["pk"])
+            return resp(200, {"ok": True})
+    raise HttpError(404, "no such token")
 
 
 @route("GET", "/api/info")
@@ -745,12 +799,12 @@ def package_views():
     return out
 
 
-@route("GET", "/api/packages")
+@route("GET", "/api/packages", auth="packages")
 def list_packages(req):
     return resp(200, {"packages": package_views()})
 
 
-@route("POST", "/api/packages/upload")
+@route("POST", "/api/packages/upload", auth="packages")
 def package_upload_url(req):
     key = f"uploads/{c.new_id(10)}.zip"
     url = c.s3().generate_presigned_url(
@@ -787,7 +841,16 @@ def read_package_zip(data):
     return manifest, mpath[len(root):], root
 
 
-@route("POST", "/api/packages/import")
+def content_digest(data):
+    """A hash of the files in a zip, so zipping the same files again (other
+    timestamps, order or compression) counts as the same upload."""
+    z = zipfile.ZipFile(io.BytesIO(data))
+    files = sorted((i.filename, c.sha256(z.read(i))) for i in z.infolist()
+                   if not i.is_dir() and "__MACOSX/" not in i.filename and not i.filename.rsplit("/", 1)[-1].startswith("._"))
+    return c.sha256(c.dumps(files))
+
+
+@route("POST", "/api/packages/import", auth="packages")
 def package_import(req):
     body = req.json()
     key = body.get("key", "")
@@ -805,16 +868,23 @@ def package_import(req):
         if e:
             raise HttpError(400, e + f" (got {v!r}); set it in the manifest or the upload form")
     digest = c.sha256(data)
+    content = content_digest(data)
     existing = c.get(f"PKG#{pkg_id}", f"VER#{version}")
     if existing:
-        if c.loads(existing["data"])["sha256"] == digest:
+        old = c.loads(existing["data"])
+        if old.get("content_sha256", old["sha256"]) == content or old["sha256"] == digest:
             c.s3().delete_object(Bucket=c.BUCKET, Key=key)
-            return resp(200, {"id": pkg_id, "version": version, "unchanged": True})
+            meta = c.get(f"PKG#{pkg_id}")
+            p = c.loads(meta["data"])
+            if body.get("activate") and p.get("active_version") != version:
+                p["active_version"] = version
+                c.put({**meta, "data": c.dumps(p)})
+            return resp(200, {"id": pkg_id, "version": version, "unchanged": True, "active_version": p["active_version"]})
         raise HttpError(409, f"{pkg_id} {version} already exists with different contents; bump the version")
     c.s3().copy_object(Bucket=c.BUCKET, Key=f"packages/{pkg_id}/{version}.zip",
                        CopySource={"Bucket": c.BUCKET, "Key": key})
     c.s3().delete_object(Bucket=c.BUCKET, Key=key)
-    ver = {"version": version, "sha256": digest, "size": len(data), "uploaded": c.now(),
+    ver = {"version": version, "sha256": digest, "content_sha256": content, "size": len(data), "uploaded": c.now(),
            "main": manifest["main"].lstrip("./"), "manifest_file": mfile, "root": root,
            "name": manifest.get("name", ""), "description": manifest.get("description", ""),
            "schema": manifest.get("schema") if isinstance(manifest.get("schema"), dict) else None,
@@ -835,7 +905,7 @@ def package_import(req):
     return resp(200, {"id": pkg_id, "version": version, "active_version": p["active_version"]})
 
 
-@route("PATCH", "/api/packages/{pkg}")
+@route("PATCH", "/api/packages/{pkg}", auth="packages")
 def package_patch(req, pkg):
     meta = c.get(f"PKG#{pkg}")
     if not meta:

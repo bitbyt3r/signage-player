@@ -3,6 +3,7 @@ import { gzImageStream, imageStream, saveStream } from "./image.js";
 import { initParams, overrideForm, schemaForm, withOrder } from "./params.js";
 import { initPerf, perfPanel } from "./perf.js";
 import { initPreview, previewPanel } from "./preview.js";
+import { bundledZips, listZip, readEntry } from "./zip.js";
 
 const $main = document.getElementById("main");
 // (h and api are function declarations below, so they're hoisted.)
@@ -876,28 +877,67 @@ async function viewProgram(id) {
 
 async function viewPackages() {
   const r = await api("GET", "/api/packages");
-  const file = h("input", { type: "file", accept: ".zip,application/zip" });
+  const file = h("input", { type: "file", accept: ".zip,application/zip", multiple: true });
   const activate = h("input", { type: "checkbox", checked: true });
   const ver = h("input", { placeholder: "from manifest" });
   const msg = h("div", { class: "small" });
+  const results = h("ul", { class: "upload-results small" });
+  // One package zip: a presigned PUT straight to S3, then the import.
+  const uploadOne = async (blob, version) => {
+    const u = await api("POST", "/api/packages/upload");
+    const put = await fetch(u.url, { method: "PUT", body: blob, headers: { "content-type": "application/zip" } });
+    if (!put.ok) throw new Error(`upload failed (${put.status})`);
+    return api("POST", "/api/packages/import", { key: u.key, version, activate: activate.checked });
+  };
   const upload = async (e) => {
     e.preventDefault();
-    const f = file.files[0];
-    if (!f) return;
+    const files = [...file.files];
+    if (!files.length) return;
+    results.replaceChildren();
     msg.className = "small muted";
-    msg.textContent = "Uploading…";
+    // A bundle (a zip of package zips) is opened here and each package uploaded on its own.
+    const jobs = [];
     try {
-      const u = await api("POST", "/api/packages/upload");
-      const put = await fetch(u.url, { method: "PUT", body: f, headers: { "content-type": "application/zip" } });
-      if (!put.ok) throw new Error(`upload failed (${put.status})`);
-      const res = await api("POST", "/api/packages/import", { key: u.key, version: ver.value.trim() || undefined, activate: activate.checked });
-      toast(res.unchanged ? `${res.id} ${res.version} was already uploaded` : `Uploaded ${res.id} ${res.version}`);
-      viewPackages();
+      for (const f of files) {
+        const buf = await f.arrayBuffer();
+        let inner = null;
+        try { inner = bundledZips(listZip(buf)); } catch { /* not a zip: let the server say so */ }
+        if (!inner) jobs.push({ label: f.name, blob: f });
+        else for (const ent of inner) jobs.push({ label: `${f.name}: ${ent.name}`, load: () => readEntry(buf, ent) });
+      }
     } catch (x) {
       msg.className = "small bad";
       msg.textContent = x.message;
+      return;
     }
+    // A version typed in the form only makes sense for a single package.
+    const version = jobs.length === 1 ? ver.value.trim() || undefined : undefined;
+    let ok = 0, same = 0, failed = 0;
+    for (const [i, job] of jobs.entries()) {
+      msg.textContent = `Uploading ${i + 1} of ${jobs.length}: ${job.label}…`;
+      const li = h("li", {}, h("span", { class: "mono" }, job.label), " ");
+      results.append(li);
+      try {
+        const blob = job.blob || new Blob([await job.load()], { type: "application/zip" });
+        const res = await uploadOne(blob, version);
+        li.append(h("span", { class: "ok" }, res.unchanged ? `${res.id} ${res.version} already uploaded`
+          : `${res.id} ${res.version}${res.active_version === res.version ? ", active" : ""}`));
+        res.unchanged ? same++ : ok++;
+      } catch (x) {
+        li.append(h("span", { class: "bad" }, x.message));
+        failed++;
+      }
+    }
+    if (jobs.length === 1 && !failed) {
+      toast(results.textContent.includes("already") ? "That version was already uploaded" : "Uploaded");
+      return viewPackages();
+    }
+    msg.className = failed ? "small bad" : "small muted";
+    msg.textContent = `${jobs.length} packages: ${ok} uploaded${same ? `, ${same} already there` : ""}${failed ? `, ${failed} failed (below)` : ""}.`;
+    const fresh = await api("GET", "/api/packages");
+    list.replaceChildren(...(fresh.packages.length ? fresh.packages.map(pkgPanel) : [h("div", { class: "panel empty" }, "No packages uploaded yet.")]));
   };
+  const list = h("div");
   const pkgPanel = (p) => h("div", { class: "panel" },
     h("div", { class: "row spread" },
       h("div", {}, h("h2", { style: "margin:0" }, p.name || p.id), h("div", { class: "muted small mono" }, p.id), p.description ? h("div", { class: "muted small" }, p.description) : ""),
@@ -921,16 +961,60 @@ async function viewPackages() {
           v.version !== p.active_version ? h("button", { class: "small danger", onclick: async () => {
             try { await api("DELETE", `/api/packages/${encodeURIComponent(p.id)}/versions/${encodeURIComponent(v.version)}`); viewPackages(); } catch (e) { toast(e.message); }
           } }, "Delete") : null)))))));
+  list.replaceChildren(...(r.packages.length ? r.packages.map(pkgPanel) : [h("div", { class: "panel empty" }, "No packages uploaded yet.")]));
   setView(
     h("h1", {}, "OGraf packages"),
-    h("p", { class: "muted" }, "Upload a zip with an OGraf graphic (its *.ograf.json manifest and files). Programs use the active version unless they pin one, so making a version active rolls it out to every device."),
+    h("p", { class: "muted" }, "Upload a zip with an OGraf graphic (its *.ograf.json manifest and files), several at once, or a bundle: a zip of package zips. Programs use the active version unless they pin one, so making a version active rolls it out to every device."),
     h("form", { class: "panel", onsubmit: upload },
       h("h2", {}, "Upload"),
       h("div", { class: "row" }, file,
-        h("label", { class: "check" }, h("span", { class: "muted small" }, "Version"), ver),
+        h("label", { class: "check", title: "Only for a single package" }, h("span", { class: "muted small" }, "Version"), ver),
         h("label", { class: "check" }, activate, "Make it the active version"),
-        h("button", { class: "primary", type: "submit" }, "Upload")), msg),
-    r.packages.length ? r.packages.map(pkgPanel) : h("div", { class: "panel empty" }, "No packages uploaded yet."));
+        h("button", { class: "primary", type: "submit" }, "Upload")), msg, results),
+    list,
+    tokensPanel());
+}
+
+// Upload tokens: for scripts/signage-upload, which uploads and activates
+// packages from a terminal (or a Claude session) without the password.
+function tokensPanel() {
+  const box = h("div");
+  const name = h("input", { placeholder: "e.g. Claude graphic threads", maxlength: 60 });
+  const shown = h("div");
+  const load = async () => {
+    const r = await api("GET", "/api/tokens");
+    box.replaceChildren(r.tokens.length ? h("div", { class: "table-wrap" }, h("table", { class: "small" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Created"), h("th", {}, "Last used"), h("th", {}, ""))),
+      h("tbody", {}, r.tokens.map((t) => h("tr", {},
+        h("td", {}, t.name), h("td", {}, ago(t.created)), h("td", {}, t.used ? ago(t.used) : "never"),
+        h("td", {}, h("button", { class: "small danger", onclick: async () => {
+          if (!confirm(`Revoke the token "${t.name}"? Scripts using it stop working.`)) return;
+          await api("DELETE", `/api/tokens/${t.id}`);
+          load();
+        } }, "Revoke"))))))) : h("p", { class: "muted small" }, "No upload tokens yet."));
+  };
+  const create = async (e) => {
+    e.preventDefault();
+    try {
+      const t = await api("POST", "/api/tokens", { name: name.value });
+      name.value = "";
+      const cmd = `echo '${JSON.stringify({ url: location.origin, token: t.token })}' > .signage-upload\ndashboard/scripts/signage-upload path/to/package-folder`;
+      shown.replaceChildren(h("div", { class: "panel warn small" },
+        h("p", { style: "margin-top:0" }, h("strong", {}, "Copy this token now. "), "It isn't shown again; revoke it and make a new one if it's lost."),
+        h("pre", { class: "mono", style: "white-space:pre-wrap;overflow-wrap:anywhere" }, t.token),
+        h("p", {}, "In the signage-player checkout (the file is git-ignored):"),
+        h("pre", { class: "mono", style: "white-space:pre-wrap;overflow-wrap:anywhere" }, cmd),
+        h("button", { type: "button", class: "small", onclick: () => navigator.clipboard.writeText(t.token).then(() => toast("Token copied")) }, "Copy token")));
+      load();
+    } catch (x) { toast(x.message); }
+  };
+  load().catch((x) => box.replaceChildren(h("p", { class: "bad small" }, x.message)));
+  return h("div", { class: "panel" },
+    h("h2", {}, "Upload tokens"),
+    h("p", { class: "muted small" }, "For uploading packages from a script, such as ", h("span", { class: "mono" }, "dashboard/scripts/signage-upload"),
+      ". A token can list, upload and activate packages, and nothing else."),
+    h("form", { class: "row", onsubmit: create }, name, h("button", { type: "submit" }, "Create token")),
+    shown, box);
 }
 
 // ------------------------------------------------------------ install images
