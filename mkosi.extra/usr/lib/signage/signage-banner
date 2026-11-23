@@ -1,0 +1,59 @@
+#!/bin/bash
+# Clears tty1 and prints which device this is, so a booting player shows more
+# than a cursor. Runs twice: from the initrd (signage-banner --initrd, via the
+# signage-boot-disk package) and early in the real system, which also sets a
+# console font that is readable on big screens. systemd's own [  OK  ] lines
+# (systemd.show_status=yes) follow below it. After an OS update it also says
+# which version it came from. signage-banner --font only sets the font (the
+# installer calls it after systemd's TTYReset has put the default back).
+set -u
+tty=/dev/tty1
+[[ -w $tty ]] || exit 0
+
+for f in /usr/lib/os-release /etc/initrd-release /etc/os-release; do
+    [[ -r $f ]] && . "$f" && [[ -n ${IMAGE_VERSION:-} ]] && break
+done
+version=${IMAGE_VERSION:-unknown version}
+
+# Terminus 32x16 from 1600 px wide (120x33 at 1080p), 24x12 from 1000.
+set_font() {
+    local size w font=
+    if read -r size </sys/class/graphics/fb0/virtual_size 2>/dev/null; then
+        w=${size%%,*}
+        if ((w >= 1600)); then font=Uni3-Terminus32x16
+        elif ((w >= 1000)); then font=Uni3-Terminus24x12
+        fi
+    fi
+    [[ -n $font ]] && setfont -C "$tty" "/usr/share/consolefonts/$font.psf.gz" 2>/dev/null
+}
+
+updated=
+case ${1:-} in
+    --font) set_font; exit 0 ;;
+    --initrd) what="starting..." ;;
+    *)
+        set_font
+        if /usr/lib/signage/signage-mode installer 2>/dev/null; then
+            what="Installer, starting..."
+        else
+            what="$(hostname 2>/dev/null || echo player), starting..."
+            # The version we booted last time, to notice an OS update.
+            last=/var/lib/signage/booted-version
+            old=$(cat "$last" 2>/dev/null)
+            if [[ -n $old && $old != "$version" ]]; then
+                updated="Updated to v$version (was v$old)"
+            fi
+            if [[ $old != "$version" ]]; then
+                mkdir -p "${last%/*}" && echo "$version" >"$last.tmp" && mv -f "$last.tmp" "$last"
+            fi
+        fi
+        ;;
+esac
+
+{
+    printf '\033[2J\033[H\n'
+    printf '  MAGFest Signage %s\n' "$version"
+    [[ -n $updated ]] && printf '  %s\n' "$updated"
+    printf '  %s\n\n' "$what"
+} >"$tty"
+exit 0

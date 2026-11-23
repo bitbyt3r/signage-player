@@ -9,6 +9,8 @@ chmod 0644 /usr/lib/sysusers.d/signage.conf /usr/lib/tmpfiles.d/signage.conf /us
 chmod -R a+rX /usr/share/signage /usr/lib/firefox-esr/distribution
 # The host page reads the kiosk's status.json through signage-web.
 ln -sfn /run/signage-kiosk /usr/share/signage/status
+# Debian only ships /usr/lib/systemd/systemd-sysupdate; put it on PATH.
+ln -sf ../lib/systemd/systemd-sysupdate /usr/bin/systemd-sysupdate
 chmod 0644 /etc/pam.d/cage /etc/chrony/conf.d/signage.conf
 # Dashboard agent: lives with the dashboard in dashboard/agent/ so both sides
 # change together.
@@ -20,7 +22,7 @@ install -D -m 0644 "$SRCDIR/dashboard/agent/signage-agent.service" /usr/lib/syst
 python3 "$SRCDIR/scripts/trim-image.py" /
 
 systemd-sysusers
-systemctl enable signage-config.service signage-install.service signage-player.service signage-web.service signage-agent.service
+systemctl enable signage-config.service signage-install.service signage-player.service signage-web.service signage-agent.service signage-banner.service
 systemctl enable NetworkManager.service chrony.service fstrim.timer
 systemctl set-default multi-user.target
 # mkosi runs "systemctl preset-all", and Debian's 90-systemd.preset has no

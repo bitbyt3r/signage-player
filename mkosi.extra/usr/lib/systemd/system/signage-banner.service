@@ -1,0 +1,17 @@
+[Unit]
+Description=Show the signage banner on tty1
+DefaultDependencies=no
+# Early, but after the console is set up and before the status lines that
+# follow it; the initrd copy of this unit runs it with --initrd.
+After=systemd-vconsole-setup.service systemd-udev-trigger.service
+Before=sysinit.target
+ConditionPathExists=/dev/tty1
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/signage/signage-banner
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=sysinit.target

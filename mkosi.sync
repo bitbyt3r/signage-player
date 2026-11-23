@@ -1,8 +1,29 @@
 #!/bin/bash
 # Runs before the build. Packs initrd/signage-boot-disk into a .deb in
 # mkosi.debs/ (PackageDirectories=), so InitrdPackages= can put it into
-# mkosi's default initrd, which has no extra-tree option of its own.
+# mkosi's default initrd, which has no extra-tree option of its own. The
+# banner script comes from mkosi.extra so both copies stay the same.
 set -euo pipefail
 cd "$SRCDIR"
+stage=$(mktemp -d); chmod 0755 "$stage"
+trap 'rm -rf "$stage"' EXIT
+cp -a initrd/signage-boot-disk/. "$stage/"
+install -D -m 0755 mkosi.extra/usr/lib/signage/signage-banner "$stage/usr/lib/signage/signage-banner"
+mkdir -p "$stage/usr/lib/systemd/system/sysinit.target.wants"
+cat >"$stage/usr/lib/systemd/system/signage-banner.service" <<'UNIT'
+[Unit]
+Description=Show the signage banner on tty1
+DefaultDependencies=no
+After=systemd-vconsole-setup.service
+Before=sysinit.target
+ConditionPathExists=/etc/initrd-release
+ConditionPathExists=/dev/tty1
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/signage/signage-banner --initrd
+StandardOutput=null
+UNIT
+ln -sf ../signage-banner.service "$stage/usr/lib/systemd/system/sysinit.target.wants/signage-banner.service"
 rm -f mkosi.debs/signage-boot-disk_*.deb
-dpkg-deb --root-owner-group -Zgzip --build initrd/signage-boot-disk mkosi.debs/signage-boot-disk_1_all.deb >/dev/null
+dpkg-deb --root-owner-group -Zgzip --build "$stage" mkosi.debs/signage-boot-disk_1_all.deb >/dev/null

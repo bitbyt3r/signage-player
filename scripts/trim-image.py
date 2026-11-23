@@ -13,6 +13,7 @@ from mkosi.postinst.chroot, before mkosi runs depmod.
 - Translations other than English (the kiosk UI is English; Firefox's own
   strings live in omni.ja).
 - Firefox's crash reporter and telemetry ping sender.
+- Console fonts other than the two Terminus sizes signage-banner uses.
 """
 import re
 import shutil
@@ -121,6 +122,18 @@ for d in (ROOT / "usr/share/locale").iterdir():
     if d.is_dir() and not (d.name == "C" or d.name.startswith(("C.", "en"))):
         remove(d)
 print(f"trim: translations: removed {mib(removed_bytes - before)}")
+
+# ---------------------------------------------------------------- console fonts
+
+# console-setup-linux is only here for signage-banner's Terminus fonts.
+before = removed_bytes
+KEEP_FONTS = {"Uni3-Terminus24x12.psf.gz", "Uni3-Terminus32x16.psf.gz"}
+fonts = ROOT / "usr/share/consolefonts"
+if fonts.is_dir():
+    for f in fonts.iterdir():
+        if f.name not in KEEP_FONTS:
+            remove(f)
+print(f"trim: console fonts: removed {mib(removed_bytes - before)}")
 
 # ---------------------------------------------------------------- firefox
 
