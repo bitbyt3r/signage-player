@@ -39,6 +39,14 @@ for u in /usr/lib/systemd/system/systemd-pcrlock*.service /usr/lib/systemd/syste
 done
 # The kiosk owns tty1; the installer prints there too.
 systemctl mask getty@tty1.service
+# NetworkManager runs the network. preset-all also enables systemd-networkd,
+# and its wait-online then waits its full 2 minutes for links it doesn't
+# manage, which holds network-online.target (and anything after it) until
+# 2 min after boot.
+for u in systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service \
+         systemd-networkd-persistent-storage.service systemd-network-generator.service; do
+    [[ -e /usr/lib/systemd/system/$u ]] && systemctl mask "$u"
+done
 
 if [[ " ${PROFILES:-} " == *" debug "* ]]; then
     systemctl enable serial-getty@ttyS0.service getty@tty2.service
