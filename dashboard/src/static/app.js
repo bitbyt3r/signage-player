@@ -240,6 +240,18 @@ function settingsForm(dev, onSave) {
   const modeList = h("datalist", { id: `modes-${dev.id}` }, modes.map((m) => h("option", { value: m })));
   const custom = h("select", {}, h("option", { value: "" }, "(stick)"), h("option", { value: "false" }, "No"), h("option", { value: "true" }, "Yes, force it"));
   custom.value = s.display?.custom === undefined ? "" : String(s.display.custom);
+  const layout = h("select", {}, h("option", { value: "" }, `(stick: ${base.display?.layout === "arch" ? "LED arch" : "Screen"})`),
+    h("option", { value: "screen" }, "Screen"), h("option", { value: "arch" }, "LED arch"));
+  layout.value = s.display?.layout || "";
+  const archHint = h("small", { class: "muted" });
+  const syncArch = () => {
+    const arch = (layout.value || base.display?.layout) === "arch";
+    archHint.textContent = arch ? "The arch draws one 2760×2565 canvas and slices it onto the LED controller's 3840×2160 map, so set Resolution to 3840x2160." : "";
+    archHint.hidden = !arch;
+    if (arch && !mode.value.trim()) mode.placeholder = "3840x2160 for the arch";
+  };
+  layout.addEventListener("change", syncArch);
+  syncArch();
   const rot = h("select", {}, h("option", { value: "" }, `(stick: ${base.display?.rotation ?? 0}°)`),
     [0, 90, 180, 270].map((r) => h("option", { value: r }, `${r}°`)));
   rot.value = s.display?.rotation === undefined ? "" : String(s.display.rotation);
@@ -295,6 +307,7 @@ function settingsForm(dev, onSave) {
     const disp = {};
     if (mode.value.trim()) disp.mode = mode.value.trim();
     if (custom.value) disp.custom = custom.value === "true";
+    if (layout.value) disp.layout = layout.value;
     if (rot.value !== "") disp.rotation = Number(rot.value);
     if (output.value) disp.output = output.value;
     if (scale.value !== "") disp.scale = Number(scale.value);
@@ -328,6 +341,7 @@ function settingsForm(dev, onSave) {
   h("div", { class: "fields" },
     h("label", { class: "field" }, h("span", {}, "Resolution"), mode, modeList),
     h("label", { class: "field" }, h("span", {}, "Force unadvertised mode"), custom),
+    h("label", { class: "field" }, h("span", {}, "Layout"), layout, archHint),
     h("label", { class: "field" }, h("span", {}, "Rotation"), rot),
     h("label", { class: "field" }, h("span", {}, "Output"), output),
     h("label", { class: "field" }, h("span", {}, "Scale"), scale)),

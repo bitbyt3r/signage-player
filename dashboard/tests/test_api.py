@@ -308,6 +308,10 @@ def test_saved_wifi_and_stick_defaults(aws):
 
 def test_device_params_and_options(aws, monkeypatch):
     token = login()
+    did0, _ = enroll("52:54:00:00:00:99")
+    s, r = call("PATCH", f"/api/devices/{did0}", {"settings": {"display": {"layout": "arch", "mode": "3840x2160"}}}, token)
+    assert s == 200 and r["settings"]["display"]["layout"] == "arch"
+    assert call("PATCH", f"/api/devices/{did0}", {"settings": {"display": {"layout": "wall"}}}, token)[0] == 400
     schema = {"type": "object", "properties": {"rooms": {"type": "array", "items": {"type": "string"}, "default": []},
                                                "title": {"type": "string", "default": ""}}}
     data = make_zip()

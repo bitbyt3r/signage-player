@@ -127,3 +127,4 @@ textarea.md-edit { min-height: 220px; font-size: 13px; }
 .color-field { display: flex; width: 100%; }
 .color-field input:not([type=color]) { width: auto; min-width: 0; flex: 1 1 0; }
 textarea.lines-edit { min-height: 220px; }
+label.field { align-content: start; } .fields { align-items: start; }

@@ -18,7 +18,7 @@ SETTINGS_KEYS = {
     "device": {"name", "timezone"},
     "network": {"wifi"},
     "ntp": {"servers"},
-    "display": {"mode", "custom", "rotation", "output", "scale"},
+    "display": {"mode", "custom", "rotation", "output", "scale", "layout"},
 }
 
 
@@ -106,6 +106,8 @@ def settings(s):
         errs.append("display.mode: use WIDTHxHEIGHT or WIDTHxHEIGHT@HZ")
     if "custom" in disp and not isinstance(disp["custom"], bool):
         errs.append("display.custom: must be true or false")
+    if "layout" in disp and disp["layout"] not in ("screen", "arch"):
+        errs.append("display.layout: must be screen or arch")
     if "rotation" in disp and not (is_int(disp["rotation"]) and disp["rotation"] in ROTATIONS):
         errs.append("display.rotation: must be 0, 90, 180 or 270")
     if "output" in disp and not (isinstance(disp["output"], str) and OUTPUT_RE.match(disp["output"])):
