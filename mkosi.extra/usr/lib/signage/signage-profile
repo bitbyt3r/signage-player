@@ -1,0 +1,106 @@
+#!/bin/bash
+# Record a Firefox (Gecko profiler) profile of the player, for the
+# dashboard's web terminal and its "GPU profile" button (run as root):
+#   signage-profile [SECONDS]     default 30
+# Restarts the player with the profiler on (graphics preset), lets it run
+# for SECONDS, has Firefox dump the profile (SIGUSR2), restarts the player
+# normally and prints where the profile is. Open it at
+# https://profiler.firefox.com. See docs/player.md ("Profiling").
+#
+# Contract with the dashboard agent: exit 0 only when it worked, leaving
+# exactly one new /var/lib/signage/profiles/profile-<host>-<UTC>.json.gz
+# (the newest 5 are kept); otherwise non-zero with the reason on stderr.
+#
+# Why SIGUSR2: Firefox ESR exits on SIGTERM without running the profiler's
+# shutdown dump (MOZ_PROFILER_SHUTDOWN), so that profile is never written.
+# SIGUSR2 makes the Gecko profiler write every process's profile to
+# $MOZ_UPLOAD_DIR/profile_<n>_<pid>.json while Firefox keeps running.
+set -uo pipefail
+
+SECS=${1:-30}
+[[ $SECS =~ ^[0-9]+$ && $SECS -ge 1 && $SECS -le 3600 ]] || { echo "usage: signage-profile [SECONDS 1-3600]" >&2; exit 2; }
+# SIGNAGE_PROFILE_* override the paths and user for tests (docs/player.md).
+KUSER=${SIGNAGE_PROFILE_USER:-signage}
+[[ $EUID -eq 0 || -n ${SIGNAGE_PROFILE_USER:-} ]] || { echo "signage-profile: run as root" >&2; exit 1; }
+
+DIR=${SIGNAGE_PROFILE_DIR:-/var/lib/signage/profiles}
+DUMP=$DIR/.dump
+ENV=${SIGNAGE_PROFILE_ENV:-/run/signage/profile.env}
+KEEP=5
+HOST=$(tr -c 'A-Za-z0-9._-' '-' </proc/sys/kernel/hostname | sed 's/-*$//')
+[[ -n $HOST ]] || HOST=signage
+OUT="$DIR/profile-$HOST-$(date -u +%Y%m%dT%H%M%SZ).json.gz"
+
+fail() { echo "signage-profile: $*" >&2; exit 1; }
+
+install -d -m 0750 -o "$KUSER" -g "$KUSER" "$DIR"
+rm -rf "$DUMP"
+install -d -m 0750 -o "$KUSER" -g "$KUSER" "$DUMP"
+restart_normal() { rm -f "$ENV"; systemctl restart signage-player.service; }
+trap 'rm -f "$ENV"; rm -rf "$DUMP"' EXIT
+
+firefox_main() {
+    # The browser process: firefox-esr run by the kiosk, not a -contentproc child.
+    local p
+    for p in $(pgrep -u "$KUSER" -x firefox-esr); do
+        tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | grep -q -- '-contentproc' || { echo "$p"; return 0; }
+    done
+    return 1
+}
+
+umask 022
+cat >"$ENV" <<EOF
+MOZ_PROFILER_STARTUP=1
+MOZ_PROFILER_STARTUP_PRESET=graphics
+MOZ_PROFILER_STARTUP_ENTRIES=16777216
+MOZ_UPLOAD_DIR=$DUMP
+EOF
+
+echo "Restarting the player with the profiler on…"
+systemctl restart signage-player.service
+
+# Wait for the new Firefox and check it picked the profiler up.
+pid=""
+for _ in $(seq 60); do
+    pid=$(firefox_main) && grep -qz "^MOZ_UPLOAD_DIR=$DUMP$" "/proc/$pid/environ" 2>/dev/null && break
+    pid=""; sleep 0.5
+done
+if [[ -z $pid ]]; then
+    restart_normal
+    fail "Firefox didn't start with the profiler within 30 s; see journalctl -u signage-player"
+fi
+# Firefox has read it; any later start of the player is a normal one.
+rm -f "$ENV"
+
+echo "Profiling Firefox (pid $pid) for $SECS s…"
+sleep "$SECS"
+kill -0 "$pid" 2>/dev/null || { restart_normal; fail "Firefox exited during the profile; see journalctl -u signage-player"; }
+
+echo "Asking Firefox to write the profile…"
+kill -USR2 "$pid"
+# Wait for the file and for it to stop growing (tens of MB).
+f="" last=-1
+for _ in $(seq 60); do
+    sleep 0.5
+    f=$(ls -1t "$DUMP"/profile_*.json 2>/dev/null | head -1)
+    [[ -n $f ]] || continue
+    size=$(stat -c %s "$f" 2>/dev/null || echo 0)
+    [[ $size -gt 0 && $size -eq $last ]] && break
+    last=$size
+done
+# The profiler keeps running after the dump; restart without it.
+restart_normal
+
+[[ -n $f && -s $f ]] || fail "NO PROFILE WRITTEN: Firefox didn't write a profile within 30 s of SIGUSR2"
+python3 -c 'import json, sys; json.load(open(sys.argv[1]))' "$f" 2>/dev/null \
+    || fail "NO PROFILE WRITTEN: Firefox's profile $f isn't complete JSON"
+gzip -c "$f" >"$OUT.tmp" && mv -f "$OUT.tmp" "$OUT" || { rm -f "$OUT.tmp"; fail "couldn't write $OUT"; }
+chmod 0640 "$OUT"
+# Keep the newest few, never the one just written.
+ls -1t "$DIR"/profile-*.json.gz 2>/dev/null | grep -vxF "$OUT" | tail -n +"$KEEP" | xargs -r rm -f
+
+echo
+echo "Profile: $OUT ($(du -h "$OUT" | cut -f1))"
+echo "Download it from the dashboard (GPU profile), or copy it off the player,"
+echo "then open https://profiler.firefox.com and choose \"Load a profile from"
+echo "file\" (.json.gz loads as is)."

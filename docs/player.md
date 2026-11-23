@@ -304,6 +304,78 @@ Checked in Firefox ESR 153 headless with the demo program for 35 s:
 p50 16.7 ms, p99 at most 17.4 ms and no long frames. The first window
 listed the status screen's 8 ms before the demo lower third started.
 
+## Profiling
+
+Two tools for the dashboard's web terminal (both run as root and are on
+`PATH`).
+
+### signage-gfx
+
+A quick look at how the player renders:
+
+- **GPU**: from `lspci`, or `/sys/class/drm/card*/device` when lspci isn't
+  installed (vendor, device ID, kernel driver).
+- **Firefox rendering**: which Mesa driver Firefox's processes have mapped
+  (`/proc/<pid>/maps`):
+  - `WebRender/GL: HARDWARE (radeonsi)`: WebRender draws with the AMD GPU.
+    This is what a sign should show.
+  - `WebRender/GL: SOFTWARE (llvmpipe/swrast)`: Mesa's CPU rasteriser, so
+    the GPU isn't being used (no `/dev/dri` access, a missing driver, or a
+    blocklisted GPU). Expect high CPU and dropped frames.
+  - `SOFTWARE (no Mesa driver mapped: ...)`: Firefox fell back to its own
+    software WebRender, the same problem as above.
+- **Player**: the renderer and the last frame stats from
+  `/run/signage/perf.json`, and what's on screen. The renderer string
+  comes from WebGL's `WEBGL_debug_renderer_info` on a throwaway canvas at
+  page start: `firefox-esr 153.0 / AMD Radeon Graphics (radeonsi, ...)` on
+  the GPU, `... / llvmpipe (LLVM ...)` in software, `no WebGL` when
+  there's no GL at all (headless Firefox, for example). The dashboard shows
+  it too.
+- **GPU load and temperatures**: `gpu_busy_percent` and the amdgpu,
+  k10temp, coretemp, acpitz and nvme hwmon sensors.
+- **radeontop**: a 5 s sample (`radeontop -d - -l 5`) of the GPU's
+  pipeline blocks. amdgpu_top isn't packaged in trixie, so it isn't
+  included.
+
+### signage-profile [SECONDS]
+
+Records a Firefox profile of the player (default 30 s), to see where frame
+time goes:
+
+1. It writes `/run/signage/profile.env` with `MOZ_PROFILER_STARTUP=1`,
+   the `graphics` preset, a 16M-entry buffer and `MOZ_UPLOAD_DIR`, and
+   restarts `signage-player.service`. The kiosk sources that file before
+   it starts Firefox. The script deletes it as soon as Firefox is running,
+   so later restarts are normal.
+2. After SECONDS it sends Firefox **SIGUSR2**, which makes the Gecko
+   profiler write the parent and every child process's profile to
+   `MOZ_UPLOAD_DIR` while Firefox keeps running. (A shutdown profile via
+   `MOZ_PROFILER_SHUTDOWN` doesn't work here: Firefox ESR exits on SIGTERM
+   without writing it.)
+3. It restarts the player without the profiler, gzips the profile to
+   `/var/lib/signage/profiles/profile-<host>-<YYYYmmddTHHMMSSZ>.json.gz`,
+   keeps the newest 5 (never deleting the new one) and prints the path and
+   size.
+
+It exits 0 only when a complete profile was written, and otherwise exits
+non-zero saying why ("NO PROFILE WRITTEN: ..."). The dashboard agent relies
+on that when it runs it for the dashboard's GPU profile button and uploads
+the file. To read it, open https://profiler.firefox.com and choose "Load a
+profile from file". The `.json.gz` loads as is.
+
+In the profile, check the renderer and compositor threads (`Renderer`,
+`WRRenderBackend`, `WRSceneBuilder`) for how long each frame takes to draw,
+and the content process's main thread for script and layout work. Expect
+the player to drop to a lower frame rate while profiling.
+
+Checked in Firefox ESR 153 headless, with a stand-in `systemctl` and the
+test overrides `SIGNAGE_PROFILE_USER`, `SIGNAGE_PROFILE_DIR` and
+`SIGNAGE_PROFILE_ENV`. A 10 s run exited 0 in 14 s with a 5 MB
+`.json.gz` (valid JSON: 7 threads plus 10 child processes). It pruned 6
+older files down to 4 plus the new one, removed `profile.env`, and the
+player came back without the profiler. With a player that never starts,
+it exited 1 with a clear message and left no file.
+
 ## Testing
 
 - Unit tests: `node --test tests/player/` (eligibility, and the perf

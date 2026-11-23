@@ -67,9 +67,24 @@ export function activeList(showing, ended, windowStart) {
     return out.slice(0, MAX_ACTIVE);
 }
 
+// The browser and the GL renderer behind it, once at start: a throwaway
+// WebGL canvas tells hardware (e.g. "AMD Radeon Vega 8 (radeonsi, ...)")
+// from software rendering ("llvmpipe").
 function rendererName() {
     const m = /Firefox\/([\d.]+)/.exec(navigator.userAgent);
-    return m ? `firefox-esr ${m[1]}` : navigator.userAgent.slice(0, 64);
+    const browser = m ? `firefox-esr ${m[1]}` : navigator.userAgent.slice(0, 40);
+    let gl = "";
+    try {
+        const ctx = document.createElement("canvas").getContext("webgl");
+        if (ctx) {
+            const ext = ctx.getExtension("WEBGL_debug_renderer_info");
+            gl = String(ctx.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : ctx.RENDERER) || "");
+            ctx.getExtension("WEBGL_lose_context")?.loseContext();
+        } else {
+            gl = "no WebGL";
+        }
+    } catch { /* leave it out */ }
+    return (gl ? `${browser} / ${gl}` : browser).slice(0, 80);
 }
 
 // ---------------------------------------------------------------- on screen

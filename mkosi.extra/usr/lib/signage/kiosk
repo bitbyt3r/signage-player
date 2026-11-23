@@ -129,4 +129,11 @@ mkdir -p "$HOME/firefox"
 # the profile always holds a "previous session". Drop it, or Firefox shows
 # an "Open previous tabs?" bar across the top of the screen.
 rm -rf "$HOME/firefox/sessionstore.jsonlz4" "$HOME/firefox/sessionstore-backups"
+# signage-profile writes this for one run: the Gecko profiler's startup
+# variables (MOZ_PROFILER_*) and MOZ_UPLOAD_DIR, where Firefox writes the
+# profile on SIGUSR2.
+if [[ -r /run/signage/profile.env ]]; then
+    set -a; . /run/signage/profile.env; set +a
+    echo "kiosk: Firefox profiler on (dumps to $MOZ_UPLOAD_DIR on SIGUSR2)" >&2
+fi
 exec firefox-esr --kiosk --no-remote --profile "$HOME/firefox" "$URL"
