@@ -860,20 +860,38 @@ class Agent:
         log_tail = []
         p = subprocess.Popen([SYSUPDATE, "update", version], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                              text=True, errors="replace", bufsize=1)
-        transfers_done = 0
+        # sysupdate's download helper prints "Got NN% of <url>. ..." per file, and each
+        # file (usr, verity, UKI) restarts at 0%. Map each file onto its own band, by
+        # rough share of the bytes, and never let the bar go backwards.
+        bands = {"usr": (3, 88), "verity": (88, 91), "efi": (91, 94), "other": (91, 94)}
+
+        def band(url):
+            u = url.lower()
+            if "verity" in u:
+                return "verity"
+            if ".usr" in u or "usr-" in u:
+                return "usr"
+            if ".efi" in u:
+                return "efi"
+            return "other"
+
+        def bump(state, pct, msg):
+            cur = self.st["update"].get("percent", 0) or 0
+            self.set_update(state, max(cur, pct), msg, version)
+
         for line in p.stdout:
             line = line.rstrip()
             if not line:
                 continue
             log_tail = (log_tail + [line])[-60:]
-            m = re.search(r"(\d{1,3})(?:\.\d+)?%", line)
+            m = re.search(r"Got (\d{1,3})(?:\.\d+)?% of (\S+?)\.?(?:\s|$)", line) \
+                or re.search(r"(\d{1,3})(?:\.\d+)?%.*?(\S*(?:usr|verity|efi)\S*)", line)
             if m:
-                # sysupdate reports per transfer (usr, verity, UKI); /usr dominates the size.
-                self.set_update("downloading", 3 + int(m.group(1)) * 0.85, line, version)
-            elif re.search(r"(?i)installing|writing|copying", line) and transfers_done == 0:
-                self.set_update("installing", max(self.st["update"].get("percent", 0), 88), line, version)
-            if re.search(r"(?i)successfully (acquired|installed)|transfer.*done", line):
-                transfers_done += 1
+                lo, hi = bands[band(m.group(2))]
+                pct = min(int(m.group(1)), 100)
+                bump("downloading", round(lo + (hi - lo) * pct / 100, 1), line)
+            elif re.match(r"(?i)\s*successfully installed", line):
+                bump("installing", 95, line)
         rc = p.wait()
         out = "\n".join(log_tail)[-6000:]
         if rc != 0:

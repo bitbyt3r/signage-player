@@ -12,9 +12,12 @@ case "$1" in
   check-new) echo 0.1.2 ;;
   update)
     echo "Selected update '$2' for install."
-    for p in 10 50 100; do echo "Downloading signage_$2.usr-x86-64.raw.zst: $p%"; done
-    echo "Successfully acquired 'signage_$2.efi'."
-    echo "Installing..."
+    U=https://github.com/x/y/releases/download/v$2
+    for f in signage_$2.usr-x86-64.0f2c.raw.xz signage_$2.usr-x86-64-verity.9a1b.raw.xz signage_$2.efi; do
+      for p in 0 12 61 100; do echo "Got $p% of $U/$f. 6s left at 19.5M/s."; done
+      echo "Successfully acquired '$f'."
+    done
+    echo "Successfully installed update '$2'."
     ;;
 esac
 """
@@ -48,8 +51,10 @@ def test_update_progress_and_reboot_check(tmp_path, monkeypatch):
     assert ok and a.reboot_requested
     states = [u["state"] for u in seen]
     assert states[0] == "checking" and "downloading" in states and states[-1] == "rebooting"
-    pct = [u["percent"] for u in seen if u["state"] == "downloading"]
-    assert pct == sorted(pct) and max(pct) >= 85
+    pct = [u["percent"] for u in seen]
+    assert pct == sorted(pct), pct
+    down = [u["percent"] for u in seen if u["state"] == "downloading"]
+    assert max(down) >= 90 and "installing" in states
     disk = json.loads((tmp_path / "run/update.json").read_text())
     assert disk["state"] == "rebooting" and disk["version"] == "0.1.2" and disk["percent"] == 100
 
