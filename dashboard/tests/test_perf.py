@@ -3,6 +3,7 @@
 import importlib.machinery
 import importlib.util
 import json
+import os
 import time
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def test_perf_sample(tmp_path, monkeypatch):
                                            "active": [{"layer": 20, "package": "b", "version": "2", "label": "B", "from": now - 3, "to": None}]}))
     s = p.sample()
     assert s["cpu"] == 50.0 and s["cpu_max_core"] == 66.7 and s["load1"] == 0.52
-    assert s["mem_total_mb"] == 7812 and s["mem_used_mb"] == 1953 and s["ff_rss_mb"] == 100.0
+    assert s["mem_total_mb"] == 7812 and s["mem_used_mb"] == 1953 and s["ff_rss_mb"] == round(25600 * os.sysconf("SC_PAGE_SIZE") / 2**20, 1)
     assert s["temp_cpu"] == 55.25 and s["temp_gpu"] == 48.0 and s["gpu_busy"] == 37
     assert s["fps"] == 55.0 and s["frame_p50"] == 17.0 and s["frame_p95"] == 30 and s["frame_max"] == 90
     assert s["long_frames"] == 3 and s["layout"] == "screen"
