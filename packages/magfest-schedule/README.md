@@ -25,20 +25,16 @@ Built from the theme team's Asset Pack 01 and style guide. The art in
 | `logo-flat.png` | Logos/FLAT LOGO/DEFAULT-Logo-Flat-Red-WhiteText-Border-NoShadow.png (the style guide's default) |
 | `heading-box-long.png` | Background_WWMenu-Heading_Box_Long.png (room name tags) |
 | `context-box.png` | Background_WWMenu-Context_Box.png (the clock) |
-| `squarewave-brown-tile.png`, `squarewave-triangle.png` | SquarewavePattern-Brown-Single / Triangle-Single (divider) |
+| `squarewave-brown-tile.png` | SquarewavePattern-Brown-Single (divider) |
 | `heart-full.png`, `heart-half.png` | HUD-Hearts.png: the time left in the current session, as ten hearts |
 | `trihard.png` | Icon-Trihard-Render-Glow-Shadow-NoBackground.png (sessions on now) |
-| `pixel-tomi.png` | Character Illustrations/Pixel-Tomi.png (next to "Now") |
-| `loot-presenting.png` | 3D Character Renders/Loot-Presenting.png (beside the clock) |
-| `n64-logo-spin.webm`, `.mp4` | Random/N64-Logo-Spin-01-0001-0250.mp4, cropped to the logo (a spinning badge beside the clock) |
 | `HyliaSerifBeta-Regular.otf`, `NotoSans-Variable.ttf` | Fonts/ (headings and body, as the style guide says) |
 
 Colours are the style guide's theme colours (gold #E4BC60, greens #2F9445 and
 #0E5135, brown #301E12). The guide's sub-heading font, Chiaro, isn't in the
 pack, so sub-headings use Hylia Serif. Animations: the logo pops in, the
-divider draws out, the cards rise in order and Loot hops up beside the
-clock and the N64 badge spins in; Tomi floats, the last full heart beats,
-the Trihards glint and the N64 logo keeps spinning. `"theme": "plain"` gives
+divider draws out and the cards rise in order; the last full heart beats
+and the Trihards glint. `"theme": "plain"` gives
 the dark version without the art.
 
 ## Settings (the dashboard's *Graphic data*)

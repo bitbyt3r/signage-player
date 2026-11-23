@@ -93,7 +93,10 @@ const STYLE = `
               margin-right: .8cqmin; vertical-align: .05em; animation: pulse 2s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: .35; } }
 .label .when { color: var(--fg); letter-spacing: .04em; margin-left: .6em; text-transform: none; font-weight: 400; }
-.now-name { font-size: 6.4cqmin; font-weight: 800; line-height: 1.08; margin: 1cqmin 0 .8cqmin;
+/* Card parts keep their size; fitCard() trims the description and title instead of letting flexbox squash them. */
+.card > * { flex-shrink: 0; }
+/* Line height and bottom padding leave room for descenders below the last clamped line. */
+.now-name { font-size: 6.4cqmin; font-weight: 800; line-height: 1.15; margin: 1cqmin 0 .8cqmin; padding-bottom: .12em;
             display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .times { font-size: 2.6cqmin; color: var(--muted); font-variant-numeric: tabular-nums; }
 .chips { display: flex; flex-wrap: wrap; gap: .8cqmin; margin-top: 1.2cqmin; }
@@ -106,7 +109,7 @@ const STYLE = `
 .progress .times { display: flex; justify-content: space-between; margin-top: .9cqmin; font-size: 2.2cqmin; }
 .left { color: var(--fg); font-weight: 700; }
 .next { border-top: .2cqmin solid var(--line); margin-top: 2.4cqmin; padding-top: 2cqmin; }
-.next-name { font-size: 3.8cqmin; font-weight: 700; line-height: 1.15; margin: .6cqmin 0 .4cqmin;
+.next-name { font-size: 3.8cqmin; font-weight: 700; line-height: 1.15; margin: .6cqmin 0 .4cqmin; padding-bottom: .12em;
              display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .idle { font-size: 4.4cqmin; color: var(--muted); margin: 1.4cqmin 0; font-weight: 700; }
 /* compact cards, for several rooms */
@@ -165,22 +168,14 @@ const STYLE = `
                       border-image: var(--img-context) 34 40 fill / 1.3cqmin 1.6cqmin stretch;
                       color: var(--brown); font-size: 4.2cqmin; padding: .4cqmin 1.4cqmin; }
 .t-super2027 .status { text-shadow: 0 .2cqmin .4cqmin #000; }
-.t-super2027 .loot { position: absolute; right: calc(100% + 1cqmin); top: -1.5cqmin; height: 15cqmin; width: auto;
-                     filter: drop-shadow(0 .5cqmin .8cqmin rgba(0,0,0,.5)); transform-origin: 50% 100%;
-                     animation: bob 3.2s ease-in-out infinite; }
-.t-super2027 .meta-wrap { position: relative; }
-.t-super2027 .divider { height: 3.2cqmin; flex: none;
-    background: var(--img-tri) center / auto 100% no-repeat, var(--img-wave) center / auto 100% repeat-x; }
-@keyframes bob { 50% { transform: translateY(-.8cqmin) rotate(-2deg); } }
-@keyframes float { 0%,100% { transform: translate(0, 0); } 30% { transform: translate(.4cqmin, -.9cqmin); } 65% { transform: translate(-.3cqmin, -.3cqmin); } }
+/* Divider: the wave tile alone. (The pack's triangle piece has its waves at a different size, so it can't sit on the tile without looking like an overlap.) */
+.t-super2027 .divider { height: 3.2cqmin; flex: none; background: var(--img-wave) center / auto 100% repeat-x; }
 @keyframes glint { 50% { filter: drop-shadow(0 0 .9cqmin rgba(255,226,140,.95)) brightness(1.25); } }
 .t-super2027 .card, .t-super2027 .side { background: var(--panel); border: .3cqmin solid var(--gold); border-radius: .6cqmin;
     box-shadow: inset 0 0 0 .5cqmin rgba(48,30,18,.9), inset 0 0 0 .65cqmin rgba(228,188,96,.45), 0 .8cqmin 2cqmin rgba(0,0,0,.45); }
 .t-super2027 .side h2, .t-super2027 .label { font-family: "S27 Hylia", serif; font-weight: 400; letter-spacing: .06em;
     font-size: 2.9cqmin; color: var(--gold); }
 .t-super2027 .label .dot { display: none; }
-.t-super2027 .label .tomi { display: inline-block; height: 4cqmin; width: auto; image-rendering: pixelated; vertical-align: -1cqmin;
-                            margin-right: 1cqmin; animation: float 2.6s ease-in-out infinite; }
 .t-super2027 .label .when { font-family: "S27 Noto", sans-serif; font-size: 2.3cqmin; color: var(--fg); }
 .t-super2027 .now-name { font-weight: 800; font-stretch: 87.5%; text-shadow: 0 .3cqmin .5cqmin rgba(0,0,0,.6); }
 .t-super2027 .next-name, .t-super2027 .row .n { font-stretch: 87.5%; }
@@ -209,9 +204,6 @@ const STYLE = `
 .t-super2027 .row .t.live img { height: 2.8cqmin; width: auto; animation: glint 2.4s ease-in-out infinite; }
 .t-super2027 .row .t { color: var(--gold); }
 .t-super2027 .pager i.on { background: var(--gold); }
-.t-super2027 .meta-wrap { display: flex; align-items: center; gap: 1.4cqmin; }
-.t-super2027 .n64 { height: 10.5cqmin; width: 10.5cqmin; border-radius: 50%; object-fit: cover; background: #000; flex: none;
-                    border: .4cqmin solid var(--gold); box-shadow: 0 0 0 .3cqmin var(--brown), 0 .6cqmin 1.4cqmin rgba(0,0,0,.55); }
 .t-super2027 .idle { color: var(--muted); font-family: "S27 Hylia", serif; font-weight: 400; }
 .t-super2027 .empty { color: var(--fg); font-family: "S27 Hylia", serif; text-shadow: 0 .3cqmin .6cqmin #000; }
 
@@ -220,7 +212,6 @@ const STYLE = `
 .t-super2027 .card.compact .progress { padding-top: .6cqmin; }
 .t-super2027 .card.compact .next { padding-top: .6cqmin; }
 @container (aspect-ratio < 1) {
-    .t-super2027 .loot { display: none; }
     .t-super2027 .logo { height: 8cqmin; }
 }
 /* portrait */
@@ -384,7 +375,7 @@ export default class MagfestSchedule extends HTMLElement {
         return h("div", { class: "card hero" },
             this.data.rooms.length > 1 || m.rooms.length > 1 ? h("div", { class: "room" }, r.short, full && h("small", {}, full)) : null,
             c ? [
-                h("div", { class: "label" }, h("span", { class: "dot" }), h("img", { class: "tomi s27", src: asset("pixel-tomi.png"), alt: "" }), "Now"),
+                h("div", { class: "label" }, h("span", { class: "dot" }), "Now"),
                 h("div", { class: "now-name" }, c.name),
                 h("div", { class: "chips" }, this.chips(c, m)),
                 this.data.showDescription && c.desc ? h("div", { class: "desc" }, c.desc) : null,
@@ -427,15 +418,40 @@ export default class MagfestSchedule extends HTMLElement {
             if (this.visible && el.isConnected && el.childElementCount) {
                 await el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 250, fill: "forwards" }).finished;
                 el.replaceChildren(...[build()].flat().filter(Boolean));
+                this.fitCards(el);
                 this.updateLive(Date.now());
                 await el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 350, fill: "forwards", easing: EASE }).finished;
             } else {
                 el.replaceChildren(...[build()].flat().filter(Boolean));
+                this.fitCards(el);
                 this.updateLive(Date.now());
             }
         }).catch((e) => console.error("[magsched]", e));
         this.swaps.set(el, p);
         return p;
+    }
+
+    // Make each card's content fit its box without cutting a line in half:
+    // first fewer description lines, then a smaller title, then fewer title
+    // and up-next lines. Clamped text ends in an ellipsis.
+    fitCards(el) {
+        for (const card of el.querySelectorAll(".card")) {
+            const over = () => card.scrollHeight > card.clientHeight + 1;
+            const name = card.querySelector(".now-name"), desc = card.querySelector(".desc"), next = card.querySelector(".next-name");
+            for (const x of [name, desc, next]) x && (x.style.fontSize = "", x.style.webkitLineClamp = "", x.style.display = "");
+            if (!card.clientHeight || !over()) continue;
+            const clamp = (x) => parseInt(getComputedStyle(x).webkitLineClamp) || 3;
+            if (desc) {
+                for (let n = clamp(desc) - 1; n >= 1 && over(); n--) desc.style.webkitLineClamp = n;
+                if (over()) desc.style.display = "none";
+            }
+            if (name && over()) {
+                const base = parseFloat(getComputedStyle(name).fontSize);
+                for (let f = 0.92; f >= 0.6 && over(); f -= 0.08) name.style.fontSize = `${base * f}px`;
+            }
+            if (next && over()) next.style.webkitLineClamp = 1;
+            if (name && over()) for (let n = clamp(name) - 1; n >= 1 && over(); n--) name.style.webkitLineClamp = n;
+        }
     }
 
     renderHeader(m) {
@@ -614,18 +630,13 @@ export default class MagfestSchedule extends HTMLElement {
         root.innerHTML = `<style>${STYLE}</style>
             <div class="frame"><header class="bar"><img class="logo s27" alt="">
             <div style="min-width:0;flex:1"><div class="title"></div><div class="subtitle"></div></div>
-            <div class="meta-wrap"><img class="loot s27" alt=""><video class="n64 s27" muted loop autoplay playsinline disablepictureinpicture></video><div class="meta"><div class="clock"></div><div class="status"></div></div></div></header>
+            <div class="meta"><div class="clock"></div><div class="status"></div></div></header>
             <div class="divider s27"></div><main class="body"></main></div>`;
         root.querySelector(".logo").src = asset("logo-flat.png");
-        root.querySelector(".loot").src = asset("loot-presenting.png");
-        // The spinning N64 logo from the asset pack (cropped to the logo); WebM for Firefox, MP4 as a fallback.
-        root.querySelector(".n64").append(
-            Object.assign(document.createElement("source"), { src: asset("n64-logo-spin.webm"), type: "video/webm" }),
-            Object.assign(document.createElement("source"), { src: asset("n64-logo-spin.mp4"), type: "video/mp4" }));
         for (const [k, f] of [["--img-bg", "background-crest-fabric.png"], ["--img-context", "context-box.png"], ["--img-heading", "heading-box-long.png"],
-            ["--img-wave", "squarewave-brown-tile.png"], ["--img-tri", "squarewave-triangle.png"]]) this.style.setProperty(k, `url("${asset(f)}")`);
+            ["--img-wave", "squarewave-brown-tile.png"]]) this.style.setProperty(k, `url("${asset(f)}")`);
         const q = (s) => root.querySelector(s);
-        this.els = { frame: q(".frame"), bar: q(".bar"), logo: q(".logo"), loot: q(".loot"), n64: q(".n64"), divider: q(".divider"), title: q(".title"), subtitle: q(".subtitle"), clock: q(".clock"), status: q(".status"), body: q(".body"), regions: {} };
+        this.els = { frame: q(".frame"), bar: q(".bar"), logo: q(".logo"), divider: q(".divider"), title: q(".title"), subtitle: q(".subtitle"), clock: q(".clock"), status: q(".status"), body: q(".body"), regions: {} };
         this.setData(data);
         // Show cached data at once; with no cache, give the network a moment.
         await Promise.all([this.store.ready(5000), loadFonts(), this.decodeImages()]);
@@ -641,8 +652,8 @@ export default class MagfestSchedule extends HTMLElement {
 
     // Wait for the art so nothing pops in mid-animation.
     decodeImages() {
-        const imgs = [this.els.logo, this.els.loot];
-        const bgs = ["background-crest-fabric.png", "heading-box-long.png", "context-box.png", "heart-full.png", "heart-half.png", "pixel-tomi.png", "trihard.png"]
+        const imgs = [this.els.logo];
+        const bgs = ["background-crest-fabric.png", "heading-box-long.png", "context-box.png", "heart-full.png", "heart-half.png", "trihard.png"]
             .map((f) => Object.assign(new Image(), { src: asset(f) }));
         const all = [...imgs, ...bgs].map((i) => i.decode().catch(() => {}));
         return Promise.race([Promise.all(all), new Promise((r) => setTimeout(r, 4000))]);
@@ -684,13 +695,10 @@ export default class MagfestSchedule extends HTMLElement {
                     this.anim(f, [{ opacity: 0 }, { opacity: 1 }], 400, skip),
                     this.anim(E.bar, [{ transform: "translateY(-120%)", opacity: 0 }, { transform: "none", opacity: 1 }], 600, skip, 150),
                     t && this.anim(E.logo, [{ transform: "scale(.4) rotate(-8deg)", opacity: 0 }, { transform: "scale(1.08)", opacity: 1, offset: .7 }, { transform: "none", opacity: 1 }], 700, skip, 300),
-                    t && this.anim(E.n64, [{ transform: "scale(.2) rotate(180deg)", opacity: 0 }, { transform: "scale(1.1) rotate(-10deg)", opacity: 1, offset: .75 }, { transform: "none", opacity: 1 }], 700, skip, 500),
                     t && this.anim(E.divider, [{ transform: "scaleX(0)", opacity: 0 }, { transform: "none", opacity: 1 }], 600, skip, 350),
-                    t && this.anim(E.loot, [{ transform: "translateY(40%) scale(.6)", opacity: 0 }, { transform: "translateY(-6%) scale(1.04)", opacity: 1, offset: .7 }, { transform: "none", opacity: 1 }], 650, skip, 650),
                     ...parts.map((p, i) => this.anim(p, [{ transform: "translateY(4cqmin)", opacity: 0 }, { transform: "none", opacity: 1 }], 550, skip, 250 + Math.min(i, 12) * 45)),
                 ]);
-                for (const a of [f, E.bar, E.logo, E.divider, E.loot, ...parts]) for (const x of a.getAnimations()) if (x.playState === "finished" && x.effect?.getComputedTiming().fill === "both") x.cancel();
-                if (t) E.n64.play?.().catch(() => {});
+                for (const a of [f, E.bar, E.logo, E.divider, ...parts]) for (const x of a.getAnimations()) if (x.playState === "finished" && x.effect?.getComputedTiming().fill === "both") x.cancel();
             }
             return { statusCode: 200, currentStep: 0 };
         });
@@ -704,14 +712,11 @@ export default class MagfestSchedule extends HTMLElement {
                 await Promise.all([
                     ...parts.map((p, i) => this.anim(p, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-3cqmin)" }], 300, skip, Math.min(i, 12) * 25)),
                     this.anim(this.els.bar, [{ opacity: 1 }, { opacity: 0 }], 300, skip, 100),
-                    this.themed && this.anim(this.els.n64, [{ transform: "none", opacity: 1 }, { transform: "scale(.3) rotate(-90deg)", opacity: 0 }], 300, skip),
-                    this.themed && this.anim(this.els.loot, [{ transform: "none", opacity: 1 }, { transform: "translateY(30%) scale(.7)", opacity: 0 }], 300, skip),
                     this.themed && this.anim(this.els.divider, [{ transform: "none", opacity: 1 }, { transform: "scaleX(0)", opacity: 0 }], 300, skip, 80),
                 ]);
                 await this.anim(f, [{ opacity: 1 }, { opacity: 0 }], 250, skip);
                 f.style.visibility = "hidden";
-                for (const x of this.els.n64.getAnimations()) x.cancel();
-                for (const a of [f, this.els.bar, this.els.loot, this.els.divider, ...parts]) for (const x of a.getAnimations()) if (x.effect?.getComputedTiming().fill === "both") x.cancel();
+                for (const a of [f, this.els.bar, this.els.divider, ...parts]) for (const x of a.getAnimations()) if (x.effect?.getComputedTiming().fill === "both") x.cancel();
                 this.visible = false;
             }
             return { statusCode: 200 };
