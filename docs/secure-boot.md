@@ -187,8 +187,14 @@ If the release GPG key changes, ship the new public key in
   persists. `config.toml` with the WiFi passwords is in `/var/lib/signage/`
   in plain text.
 - **The SIGNCFG partition** on the install stick is plain FAT.
-- **No TPM.** Nothing is sealed to the boot state and the disk isn't
-  encrypted, so pulling the disk gives full read access.
+- **No TPM use yet.** Nothing is sealed to the boot state and the disk isn't
+  encrypted, so pulling the disk gives full read access. The TPM plumbing
+  works (tss2 libraries in the image and initrd; tpm_crb/tpm_tis are built
+  into the kernel), so systemd measures the boot phases into PCR 11. The
+  `systemd-pcrlock-*` units are masked: mkosi applies presets and Debian's
+  preset file has no `disable *`, so they came enabled, and they fail
+  without a pcrlock policy. A sealed root later will use signed PCR
+  policies, not pcrlock.
 - **The firmware.** A BIOS without a supervisor password lets anyone turn
   Secure Boot off or boot USB first; that's the per-machine BIOS step.
 - **Other signed media.** The firmware still trusts everything Microsoft

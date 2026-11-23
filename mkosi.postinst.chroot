@@ -23,6 +23,14 @@ systemd-sysusers
 systemctl enable signage-config.service signage-install.service signage-player.service signage-web.service signage-agent.service
 systemctl enable NetworkManager.service chrony.service fstrim.timer
 systemctl set-default multi-user.target
+# mkosi runs "systemctl preset-all", and Debian's 90-systemd.preset has no
+# "disable *", so every unit with an [Install] section gets enabled,
+# including systemd-pcrlock's policy units. Those need a pcrlock policy we
+# don't use (TPM-sealed secrets will use signed PCR policies instead) and
+# fail on machines with a TPM.
+for u in /usr/lib/systemd/system/systemd-pcrlock*.service /usr/lib/systemd/system/systemd-pcrlock*.socket; do
+    [[ -e $u ]] && systemctl mask "${u##*/}"
+done
 # The kiosk owns tty1; the installer prints there too.
 systemctl mask getty@tty1.service
 
