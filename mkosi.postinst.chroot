@@ -42,10 +42,16 @@ systemctl mask getty@tty1.service
 # NetworkManager runs the network. preset-all also enables systemd-networkd,
 # and its wait-online then waits its full 2 minutes for links it doesn't
 # manage, which holds network-online.target (and anything after it) until
-# 2 min after boot.
-for u in systemd-networkd.service systemd-networkd.socket systemd-networkd-wait-online.service \
-         systemd-networkd-persistent-storage.service systemd-network-generator.service; do
-    [[ -e /usr/lib/systemd/system/$u ]] && systemctl mask "$u"
+# 2 min after boot. Masked in /usr, not just /etc: an installed player keeps
+# its own /etc across /usr updates, with the old enable symlinks in it.
+for u in systemd-networkd.service systemd-networkd.socket systemd-networkd-varlink.socket \
+         systemd-networkd-resolve-hook.socket systemd-networkd-wait-online.service \
+         systemd-networkd-wait-online@.service systemd-networkd-persistent-storage.service \
+         systemd-network-generator.service; do
+    f=/usr/lib/systemd/system/$u
+    [[ -e $f || -L $f ]] || continue
+    ln -sfn /dev/null "$f"
+    find /etc/systemd/system -lname "*/$u" -delete
 done
 
 if [[ " ${PROFILES:-} " == *" debug "* ]]; then
