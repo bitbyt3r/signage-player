@@ -534,3 +534,34 @@ def test_terminal_ws_auth(aws):
     # The command record doesn't keep the device's terminal secret.
     s, d = call("GET", f"/api/devices/{did}", token=token)
     assert "token" not in d["commands"][0]["args"]
+
+
+def test_stream_session(aws, monkeypatch):
+    did, tok = enroll()
+    token = login()
+    assert call("POST", f"/api/devices/{did}/stream", {"quality": "4k"}, token)[0] == 400
+    assert call("POST", f"/api/devices/{did}/stream", {"output": "DP-1; rm"}, token)[0] == 400
+    assert call("POST", f"/api/devices/{did}/stream", {"bitrate": 10}, token)[0] == 400
+    s, t = call("POST", f"/api/devices/{did}/stream", {"quality": "1080", "output": "DP-2", "control": False}, token)
+    assert s == 200 and t["ice_servers"] == app.DEFAULT_ICE and t["session"]
+    s, r = call("POST", "/device/checkin", {}, device=(did, tok))
+    [c] = r["commands"]
+    assert c["type"] == "stream" and c["args"]["session"] == t["session"]
+    assert c["args"]["quality"] == "1080" and c["args"]["output"] == "DP-2" and c["args"]["control"] is False
+    assert c["args"]["ice_servers"] == app.DEFAULT_ICE
+    # The relay accepts both ends, as for a terminal.
+    conn = {"routeKey": "$connect", "domainName": "ws.example", "stage": "prod"}
+    assert ws.handler({"requestContext": {**conn, "connectionId": "a1"},
+                       "queryStringParameters": {"session": t["session"], "role": "admin", "token": t["token"]}})["statusCode"] == 200
+    ws._send = lambda api, conn, msg: True
+    assert ws.handler({"requestContext": {**conn, "connectionId": "d1"},
+                       "queryStringParameters": {"session": t["session"], "role": "device", "token": c["args"]["token"]}})["statusCode"] == 200
+    # Secrets and TURN credentials aren't kept in the command history.
+    s, d = call("GET", f"/api/devices/{did}", token=token)
+    assert "token" not in d["commands"][0]["args"] and "ice_servers" not in d["commands"][0]["args"]
+
+    # Configured servers replace the default; bad JSON falls back to it.
+    monkeypatch.setattr(app, "ICE_SERVERS", '[{"urls": "turn:turn.example:3478", "username": "u", "credential": "p"}]')
+    assert call("POST", f"/api/devices/{did}/stream", {}, token)[1]["ice_servers"][0]["urls"] == "turn:turn.example:3478"
+    monkeypatch.setattr(app, "ICE_SERVERS", "not json")
+    assert call("POST", f"/api/devices/{did}/stream", {}, token)[1]["ice_servers"] == app.DEFAULT_ICE

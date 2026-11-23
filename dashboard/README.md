@@ -14,7 +14,12 @@ after:
  browser ◀──WSS──▶ API Gateway (WebSocket) ──▶ Lambda  ws.py      (terminal relay)
  player  ◀──WSS──▶        same URL          ─┘
                                                Lambda  mirror.py  (copies a GitHub release's image to S3)
+ browser ◀═════ WebRTC (live view video, mouse and keyboard) ═════▶ player
 ```
+
+Live view's video doesn't go through AWS: the WebSocket relay only carries
+its handshake, then the browser and the player talk directly (or through an
+optional TURN server).
 
 The web UI is plain HTML/JS served by the same Lambda, so there is one URL
 and no build step.
@@ -48,6 +53,8 @@ Answer the prompts:
 | Confirm changes before deploy | `y` |
 | Allow SAM CLI IAM role creation | `y` |
 | ApiFunction has no authentication. Is this okay? | `y` (the app checks the password and device tokens itself) |
+| Parameter IceServers | leave blank (public STUN servers). See *Live view through strict networks* below. |
+| Parameter TurnKeyId / TurnKeyToken | leave blank, or a Cloudflare TURN key (same section) |
 | Save arguments to configuration file | `y` |
 
 It takes about two minutes. The last lines print the outputs:
@@ -119,6 +126,25 @@ Players enroll on first boot after install and show up on the Devices page.
 In API Gateway, add a custom domain (with an ACM certificate) mapped to the
 HTTP API, and point a DNS name at it. Use that name in `config.toml`. The
 terminal WebSocket keeps its own `execute-api` URL; that's fine.
+
+### Live view through strict networks (optional)
+
+Live view connects the browser straight to the player, finding a path with
+public STUN servers. That works on the same network and through most home,
+office and mobile connections. Some networks (symmetric NAT, or hotel and
+venue WiFi that blocks UDP between clients) need a TURN relay; without one,
+live view says "No network path to the device". Either:
+
+- **Cloudflare TURN**: in the Cloudflare dashboard, *Realtime → TURN Server*,
+  create a key, then `sam deploy --parameter-overrides TurnKeyId=<key id>
+  TurnKeyToken=<API token>` (plus your other parameters). The dashboard asks
+  Cloudflare for credentials valid 24 hours each time a live view opens.
+  Cloudflare bills TURN by the GB relayed, with a free monthly allowance;
+  only streams that can't connect directly use it. A 1080p stream is about
+  2.7 GB an hour.
+- **Any TURN server** (coturn on a small VM, or another provider): set
+  `IceServers` to a JSON list in the browser's RTCIceServer form, such as
+  `[{"urls":"stun:stun.l.google.com:19302"},{"urls":"turn:turn.example.com:3478","username":"u","credential":"p"}]`.
 
 ### Cost
 
@@ -192,6 +218,20 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   Profiles already on the device (`/var/lib/signage/profiles/`) are listed
   under Status with *Fetch*. Files are kept 14 days. *Renderer* in Status
   shows the GL renderer, flagged when Firefox is rendering in software.
+- **Live view**: the device's screen in the browser at its own resolution
+  and 30 fps, with your mouse and keyboard sent to the sign while *Control*
+  is ticked and the picture has focus (click it). It runs only while the
+  panel is open. The device grabs the screen's scanout buffer with ffmpeg
+  (`kmsgrab`) and encodes H.264 on the GPU (VAAPI), so it costs almost no
+  CPU; if the GPU can't encode, it falls back to software at up to 720p
+  (the stats line says which). *Up to 1080p* / *Up to 720p* lower the
+  resolution for slow links. On a device with several screens, pick which
+  one to show; the pointer still moves over all of them. Rotated screens are
+  turned upright using the device's rotation setting; *Rotate* corrects it
+  if one comes out sideways. Mouse and keyboard arrive as a virtual USB
+  tablet and keyboard, which disappear when the view closes. Needs OS
+  0.3.5 or later; see *Live view through strict networks* if it can't
+  connect.
 - **Terminal**: a root shell on the device, in the browser. The device opens
   the connection when asked (within a few seconds while you have its page
   open), so it works behind NAT. Close it with *Close* or `exit`.
@@ -220,7 +260,7 @@ under an existing version are refused (identical files are a no-op).
 
 ```bash
 pip install boto3 "moto[server,dynamodb,s3]" pytest websockets
-pytest tests/                                  # API, agent end to end, release mirror
+pytest tests/                                  # API, agent end to end, release mirror, live view
 python3 scripts/dev_server.py                  # http://127.0.0.1:8000, password dev-password-123
 python3 scripts/dev_server.py --fake-release some-disk.raw   # also offer it on Install images
 ```
@@ -228,7 +268,13 @@ python3 scripts/dev_server.py --fake-release some-disk.raw   # also offer it on 
 The dev server runs the real Lambda code against moto (fake DynamoDB and
 S3). The terminal relay isn't emulated locally. `tests/test_agent_e2e.py`
 runs the real device agent against it and checks its overrides with the
-image's own `signage-config --check`.
+image's own `signage-config --check`. `tests/test_stream_e2e.py` runs live
+view end to end: `live.js` in Playwright's Chromium, a stand-in relay, and
+the real `signage-stream` streaming ffmpeg's test pattern
+(`SIGNAGE_STREAM_SOURCE=test`) instead of the screen. It needs GStreamer's
+WebRTC with Python GI (`python3-gst-1.0 gir1.2-gst-plugins-bad-1.0
+gstreamer1.0-nice gstreamer1.0-plugins-bad`), ffmpeg and Playwright for node,
+and is skipped without them.
 
 ## The device side
 
@@ -252,7 +298,10 @@ root and:
    the player needs is local, so playback continues through network loss.
 5. Runs commands: `reboot`, `restart-player`, `screenshot` (grim, uploaded
    straight to S3), `terminal` (a PTY over the WebSocket relay), `os-update`
-   (`systemd-sysupdate update [version]`, then reboot), `resync`.
+   (`systemd-sysupdate update [version]`, then reboot), `resync`, `stream`
+   (live view: runs `agent/signage-stream`, which captures, encodes and
+   sends the screen over WebRTC and injects input through `/dev/uinput`;
+   the agent relays its offer and the browser's answer over the WebSocket).
 
 ### content.json (what the player reads)
 
@@ -306,5 +355,10 @@ shows nothing.
 - Saved WiFi passwords are kept in DynamoDB (encrypted at rest by AWS) and
   are only ever sent out inside a generated config.toml or a device's
   settings, never back to the dashboard's lists.
+- Live view gives the same control as the terminal (anyone with the
+  password can already get a root shell). Its video and input are encrypted
+  end to end by WebRTC (DTLS-SRTP), and the device only accepts a session
+  the dashboard created for it. TURN credentials are short-lived and are
+  removed from the command history once the device has them.
 - Screenshots, packages and images are in a private bucket and reached
   through short-lived presigned URLs.

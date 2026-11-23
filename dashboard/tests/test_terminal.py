@@ -82,3 +82,59 @@ def test_reorder_skips_lost_frames(monkeypatch):
     assert r.push(3, "d") == []      # frame 2 lost
     t[0] += 2
     assert r.push(4, "e") == ["d", "e"]
+
+
+def test_stream_session_relays_handshake(tmp_path, monkeypatch):
+    """The agent runs signage-stream and carries its offer and the browser's
+    answer over the relay. A stub stands in for signage-stream here; the real
+    one is exercised by tests/stream_e2e.mjs."""
+    stub = tmp_path / "signage-stream"
+    stub.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "cfg = json.loads(sys.argv[1])\n"
+        "print(json.dumps({'t': 'info', 'cfg': cfg}), flush=True)\n"
+        "print(json.dumps({'t': 'offer', 'sdp': 'v=0 offer'}), flush=True)\n"
+        "for line in sys.stdin:\n"
+        "    m = json.loads(line)\n"
+        "    if m['t'] == 'answer':\n"
+        "        print(json.dumps({'t': 'connected', 'got': m['sdp']}), flush=True)\n"
+        "    elif m['t'] == 'stop':\n"
+        "        break\n"
+        "print(json.dumps({'t': 'ended', 'reason': 'closed by the viewer'}), flush=True)\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("SIGNAGE_STREAM_BIN", str(stub))
+    agent = load_agent()
+    seen = []
+
+    async def relay(ws):
+        while True:
+            m = json.loads(await asyncio.wait_for(ws.recv(), 10))
+            seen.append(m)
+            if m["t"] == "offer":
+                await ws.send(json.dumps({"t": "answer", "sdp": "v=0 answer"}))
+            elif m["t"] == "connected":
+                await ws.send(json.dumps({"t": "stop"}))
+            elif m["t"] == "ended":
+                break
+
+    async def main(port_box, done):
+        async with websockets.serve(relay, "127.0.0.1", 0) as srv:
+            port_box.append(srv.sockets[0].getsockname()[1])
+            await asyncio.get_running_loop().run_in_executor(None, done.wait, 20)
+
+    port_box, done = [], threading.Event()
+    threading.Thread(target=lambda: asyncio.run(main(port_box, done)), daemon=True).start()
+    while not port_box:
+        pass
+    result = {}
+    w = threading.Thread(target=lambda: result.update(r=agent.stream_session({
+        "ws_url": f"ws://127.0.0.1:{port_box[0]}/prod", "session": "s", "token": "t",
+        "quality": "720", "control": True, "ice_servers": [{"urls": "stun:x"}]})))
+    w.start()
+    w.join(20)
+    done.set()
+    assert result.get("r") == "closed by the viewer"
+    assert [m["t"] for m in seen] == ["info", "offer", "connected", "ended"]
+    assert seen[0]["cfg"]["quality"] == "720" and seen[0]["cfg"]["ice_servers"] == [{"urls": "stun:x"}]
+    assert seen[2]["got"] == "v=0 answer"

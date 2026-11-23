@@ -21,6 +21,19 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional GitHub token (press Enter to skip). Only needed for a private repo or to lift the anonymous API rate limit.
+  IceServers:
+    Type: String
+    Default: ""
+    Description: Optional (press Enter to skip). Live view STUN/TURN servers as a JSON list of RTCIceServer objects. Blank uses public STUN servers.
+  TurnKeyId:
+    Type: String
+    Default: ""
+    Description: Optional (press Enter to skip). Cloudflare TURN key ID, for live view through networks that block direct connections.
+  TurnKeyToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Optional (press Enter to skip). The API token for that Cloudflare TURN key.
 
 Globals:
   Function:
@@ -99,6 +112,9 @@ Resources:
           GITHUB_TOKEN: !Ref GitHubToken
           WS_URL: !Sub wss://${WsApi}.execute-api.${AWS::Region}.amazonaws.com/prod
           MIRROR_FUNCTION: !Ref MirrorFunction
+          ICE_SERVERS: !Ref IceServers
+          TURN_KEY_ID: !Ref TurnKeyId
+          TURN_KEY_TOKEN: !Ref TurnKeyToken
       Policies:
         - DynamoDBCrudPolicy: { TableName: !Ref Table }
         - S3CrudPolicy: { BucketName: !Ref Bucket }
