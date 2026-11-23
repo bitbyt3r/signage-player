@@ -1,0 +1,121 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OGraf preview</title>
+<!--
+  Preview an OGraf package from packages/ in a desktop browser.
+  From the repo root:  python3 -m http.server 8080
+  then open           http://localhost:8080/scripts/ograf-preview.html
+  ?graphic=/packages/<id>/<id>.ograf.json picks another package.
+-->
+<style>
+  :root { color-scheme: dark; --bg: #15181c; --panel: #1e2328; --line: #343b43; --fg: #e8edf1; --muted: #9aa6b1; --acc: #E4BC60; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; display: grid;
+         grid-template-columns: 320px 1fr; height: 100vh; }
+  aside { background: var(--panel); border-right: 1px solid var(--line); padding: 16px; overflow: auto; }
+  h1 { font-size: 16px; margin: 0 0 12px; }
+  label { display: block; margin: 0 0 12px; }
+  label > span { display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  input, select, textarea { width: 100%; background: #111418; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
+  textarea { height: 76px; resize: vertical; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; }
+  button { background: #2a3138; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; font: inherit; cursor: pointer; }
+  button.primary { background: var(--acc); color: #301E12; border-color: var(--acc); font-weight: 600; }
+  .hint { color: var(--muted); font-size: 12px; }
+  #log { font: 12px ui-monospace, monospace; color: var(--muted); white-space: pre-wrap; margin-top: 8px; }
+  main { display: grid; place-items: center; padding: 16px; min-width: 0; min-height: 0; overflow: hidden; }
+  #box { position: relative; }
+  #stage { position: absolute; left: 0; top: 0; background: #000; box-shadow: 0 0 0 1px var(--line); overflow: hidden; transform-origin: 0 0; }
+  #layer { position: absolute; inset: 0; }
+</style>
+<aside>
+  <h1>OGraf preview</h1>
+  <label><span>Rooms (one per line, empty = whole schedule)</span><textarea id="rooms" placeholder="Panels 1&#10;Main Concerts"></textarea></label>
+  <label><span>Only these tracks (one per line)</span><textarea id="tracks" placeholder="Panels"></textarea></label>
+  <label><span>Hide these tracks</span><textarea id="excludeTracks"></textarea></label>
+  <label><span>Abbreviate names to (characters, 0 = off)</span><input id="abbreviate" type="number" min="0" value="0"></label>
+  <label><span>Theme</span><select id="theme"><option value="super2027">super2027</option><option value="plain">plain</option></select></label>
+  <label><span>Screen</span><select id="screen">
+    <option value="1920x1080">1920×1080 landscape</option><option value="1280x720">1280×720</option>
+    <option value="1080x1920">1080×1920 portrait</option><option value="fit">Fit window</option></select></label>
+  <label><span>Other graphic data (JSON, merged in)</span><textarea id="extra">{}</textarea></label>
+  <div class="row">
+    <button class="primary" id="apply">Apply</button>
+    <button id="play">Play</button><button id="stop">Stop</button><button id="reload">Reload</button>
+  </div>
+  <p class="hint">Apply sends the settings with updateAction. Play/Stop run the in and out animations. Reload starts over with load().</p>
+  <datalist id="room-list"></datalist><datalist id="track-list"></datalist>
+  <p class="hint" id="names"></p>
+  <div id="log"></div>
+</aside>
+<main><div id="box"><div id="stage"><div id="layer"></div></div></div></main>
+<script type="module">
+const q = new URLSearchParams(location.search);
+const manifestUrl = new URL(q.get("graphic") || "/packages/magfest-schedule/magfest-schedule.ograf.json", location.href);
+const $ = (id) => document.getElementById(id);
+const log = (...a) => { $("log").textContent = `${new Date().toLocaleTimeString()} ${a.join(" ")}\n` + $("log").textContent; };
+const lines = (id) => $(id).value.split("\n").map((s) => s.trim()).filter(Boolean);
+const KEY = "ograf-preview:" + manifestUrl.pathname;
+
+let manifest, cls, el, n = 0;
+
+function data() {
+  let extra = {};
+  try { extra = JSON.parse($("extra").value || "{}"); } catch { log("Other graphic data is not valid JSON; ignored"); }
+  return { rooms: lines("rooms"), tracks: lines("tracks"), excludeTracks: lines("excludeTracks"),
+           abbreviate: Number($("abbreviate").value) || 0, theme: $("theme").value, ...extra };
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify({ ...Object.fromEntries(["rooms", "tracks", "excludeTracks", "abbreviate", "theme", "screen", "extra"].map((k) => [k, $(k).value])) })); } catch {} }
+function restore() { try { const s = JSON.parse(localStorage.getItem(KEY) || "{}"); for (const [k, v] of Object.entries(s)) if ($(k)) $(k).value = v; } catch {} }
+
+function sizeStage() {
+  const st = $("stage"), main = $("box").parentElement.getBoundingClientRect();
+  let [w, h] = $("screen").value === "fit" ? [main.width - 32, main.height - 32] : $("screen").value.split("x").map(Number);
+  const scale = Math.min(1, (main.width - 32) / w, (main.height - 32) / h);
+  // Render at the real resolution, scaled down to fit the window.
+  Object.assign(st.style, { width: `${w}px`, height: `${h}px`, transform: `scale(${scale})` });
+  Object.assign($("box").style, { width: `${w * scale}px`, height: `${h * scale}px` });
+}
+
+async function mount() {
+  if (el) { try { await el.stopAction({ skipAnimation: true }); await el.dispose?.(); } catch {} el.remove(); }
+  const defaults = {};
+  for (const [k, v] of Object.entries(manifest.schema?.properties || {})) if ("default" in v) defaults[k] = v.default;
+  const tag = `ograf-preview-${++n}`;
+  customElements.define(tag, class extends cls {});
+  el = document.createElement(tag);
+  $("layer").append(el);
+  const t = performance.now();
+  const r = await el.load({ data: { ...defaults, ...data() }, renderType: "realtime",
+    renderCharacteristics: { resolution: { width: $("stage").offsetWidth, height: $("stage").offsetHeight } } });
+  log(`load ${r?.statusCode} in ${Math.round(performance.now() - t)} ms`);
+  await play();
+}
+async function play() { const t = performance.now(); const r = await el.playAction({}); log(`play ${r?.statusCode} in ${Math.round(performance.now() - t)} ms`); }
+async function stop() { const t = performance.now(); const r = await el.stopAction({}); log(`stop ${r?.statusCode} in ${Math.round(performance.now() - t)} ms`); }
+
+async function fillNames() {
+  // Suggestions from the schedule server the graphic uses.
+  const base = (data().apiBase || manifest.schema?.properties?.apiBase?.default || "https://schedule.magfest.net").replace(/\/+$/, "");
+  try {
+    const [locs, trks] = await Promise.all(["/locations?limit=-1", "/tracks?limit=-1"].map((p) => fetch(base + p).then((r) => r.json())));
+    $("names").textContent = `${locs.length} rooms and ${trks.length} tracks on ${base}. Room names can drop the part in brackets ("Panels 1").`;
+    $("room-list").replaceChildren(...locs.map((l) => Object.assign(document.createElement("option"), { value: l.name })));
+    log("Rooms: " + locs.map((l) => l.name).filter((x) => !/^(Indies )?Booth /.test(x)).join(" | "));
+    log("Tracks: " + trks.map((t) => t.name).join(" | "));
+  } catch (e) { $("names").textContent = `Couldn't reach ${base}: ${e.message}`; }
+}
+
+restore();
+manifest = await (await fetch(manifestUrl, { cache: "no-store" })).json();
+document.title = `${manifest.name} preview`;
+cls = (await import(new URL(manifest.main, manifestUrl).href + `?t=${Date.now()}`)).default;
+sizeStage(); addEventListener("resize", sizeStage);
+$("screen").onchange = () => { save(); sizeStage(); mount(); };
+$("apply").onclick = async () => { save(); const r = await el.updateAction({ data: data() }); log(`update ${r?.statusCode}`); };
+$("play").onclick = play; $("stop").onclick = stop;
+$("reload").onclick = () => { save(); mount(); };
+await mount();
+fillNames();
+</script>

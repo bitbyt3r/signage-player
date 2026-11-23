@@ -540,17 +540,19 @@ export default class MagfestSchedule extends HTMLElement {
     }
 
     layoutSchedule() {
+        // Rows are sized in container units, so they scale with the screen;
+        // only the number of rows and columns is measured here (layout sizes,
+        // not getBoundingClientRect, so a scaled preview lays out like the screen).
         const list = this.els.regions.list;
-        const box = list.getBoundingClientRect();
-        const host = this.getBoundingClientRect();
-        const unit = Math.min(host.width, host.height) / 100 || 8;
-        const rowH = Math.max(24, unit * 8.2);
-        const cols = box.width / unit > 150 ? 2 : 1;
+        const unit = Math.min(this.offsetWidth, this.offsetHeight) / 100;
+        if (!unit || !list.clientHeight) return this.lastPer || 8;
+        const rowH = unit * 8.2;
+        const cols = list.clientWidth / unit > 150 ? 2 : 1;
         const rows = Math.max(1, Math.floor((list.clientHeight + 0.5) / rowH));
-        list.style.setProperty("--row-h", `${rowH}px`);
+        list.style.setProperty("--row-h", "8.2cqmin");
         list.style.setProperty("--cols", cols);
         list.style.setProperty("--rows", rows);
-        return rows * cols;
+        return (this.lastPer = rows * cols);
     }
 
     renderSchedule(m, now) {
@@ -628,7 +630,8 @@ export default class MagfestSchedule extends HTMLElement {
         this.render(true);
         this.updateLive(Date.now());
         this.ticker = setInterval(() => this.tick(), 1000);
-        this.onResize = new ResizeObserver(() => { if (this.mode === "schedule") { this.key = ""; this.render(false); } });
+        // Re-flow on any size change (window resize, rotation, resolution change).
+        this.onResize = new ResizeObserver(() => { this.key = this.sideKey = ""; this.render(false); });
         this.onResize.observe(this);
         return { statusCode: 200 };
     }
