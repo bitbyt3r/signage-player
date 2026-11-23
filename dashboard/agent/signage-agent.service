@@ -1,8 +1,11 @@
 [Unit]
 Description=Signage dashboard agent (check-in, settings, content sync, remote commands)
 Documentation=file:///usr/share/doc/signage/dashboard.md
-After=signage-config.service network-online.target
-Wants=network-online.target
+# Not network-online.target: the agent retries every 3-15 s until it gets
+# through, so waiting for NetworkManager-wait-online (up to 60 s, longer with
+# configured WiFi networks that are out of range) only delays the first
+# check-in after boot.
+After=signage-config.service
 ConditionPathExists=!/run/signage/installer
 
 [Service]
