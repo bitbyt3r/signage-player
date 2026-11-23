@@ -348,6 +348,14 @@ A quick look at how the player renders:
 - **radeontop**: a 5 s sample (`radeontop -d - -l 5`) of the GPU's
   pipeline blocks. amdgpu_top isn't packaged in trixie, so it isn't
   included.
+- **Memory**: the memory slots from `dmidecode -t 17` (size, rated and
+  running speed), whether that's dual or single channel, the GPU's memory
+  carve-out and memory clock levels from amdgpu sysfs. The Vega GPU in the
+  M715q uses system RAM, so one module (single channel) halves its memory
+  bandwidth.
+- **Memory bandwidth**: `mbw -q -n 5 256`, average MEMCPY/DUMB/MCBLOCK
+  rates over five 256 MiB copies (a few seconds). Compare signs with one
+  and two modules.
 
 ### signage-profile [SECONDS]
 

@@ -3,7 +3,8 @@
 #   signage-gfx
 # Prints the GPU, whether Firefox renders on it (radeonsi) or in software
 # (llvmpipe), the player's renderer and frame stats, GPU load and
-# temperatures, and a 5 s radeontop sample. See docs/player.md ("Profiling").
+# temperatures, a 5 s radeontop sample, the memory modules and a short
+# memory bandwidth test. See docs/player.md ("Profiling").
 set -uo pipefail
 
 h() { printf '\n== %s\n' "$1"; }
@@ -79,4 +80,40 @@ if command -v radeontop >/dev/null; then
     timeout 10 radeontop -d - -l 5 2>&1 || echo "radeontop failed (not an AMD GPU?)"
 else
     echo "radeontop isn't installed"
+fi
+
+h "Memory"
+# The integrated GPU uses system RAM, so its bandwidth is the RAM's: one
+# module (single channel) gives it half of what two give.
+if command -v dmidecode >/dev/null; then
+    dmidecode -t 17 | awk -F': ' '
+        /^Memory Device/ { n++ }
+        /^\tLocator:/ { loc[n] = $2 }
+        /^\tSize:/ { size[n] = $2 }
+        /^\tSpeed:/ { sp[n] = $2 }
+        /^\tConfigured Memory Speed:/ { cs[n] = $2 }
+        /^\tPart Number:/ { pn[n] = $2 }
+        END {
+            for (i = 1; i <= n; i++) {
+                if (size[i] ~ /No Module/) { printf "%-12s empty\n", loc[i]; continue }
+                used++
+                printf "%-12s %s, rated %s, running at %s  %s\n", loc[i], size[i], sp[i], cs[i], pn[i]
+            }
+            printf "%d of %d slots used: %s\n", used, n, (used >= 2 ? "dual channel" : "SINGLE CHANNEL (GPU memory bandwidth halved)")
+        }'
+else
+    echo "dmidecode isn't installed"
+fi
+for d in /sys/class/drm/card[0-9]/device; do
+    [[ -r $d/mem_info_vram_total ]] || continue
+    echo "${d%/device}: GPU memory carve-out $(( $(<"$d/mem_info_vram_total") >> 20 )) MiB, used $(( $(<"$d/mem_info_vram_used") >> 20 )) MiB" | sed 's|/sys/class/drm/||'
+    [[ -r $d/pp_dpm_mclk ]] && echo "memory clock levels (* = now):" && sed 's/^/  /' "$d/pp_dpm_mclk"
+done
+
+h "Memory bandwidth (mbw, 256 MiB copies)"
+if command -v mbw >/dev/null; then
+    timeout 60 mbw -q -n 5 256 2>&1 | grep AVG || echo "mbw failed"
+    echo "(MEMCPY: dual-channel DDR4-2400 is roughly twice what single channel gets)"
+else
+    echo "mbw isn't installed"
 fi
