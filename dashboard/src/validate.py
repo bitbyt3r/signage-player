@@ -11,6 +11,7 @@ NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 HOST_RE = re.compile(r"^[A-Za-z0-9.:-]{1,253}$")
 TZ_RE = re.compile(r"^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$")
 OUTPUT_RE = re.compile(r"^[A-Za-z0-9_.-]{0,64}$")
+SPAN_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
 SLUG_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
@@ -18,7 +19,7 @@ SETTINGS_KEYS = {
     "device": {"name", "timezone"},
     "network": {"wifi"},
     "ntp": {"servers"},
-    "display": {"mode", "custom", "rotation", "output", "scale", "layout"},
+    "display": {"mode", "custom", "rotation", "output", "scale", "layout", "span"},
 }
 
 
@@ -112,6 +113,13 @@ def settings(s):
         errs.append("display.rotation: must be 0, 90, 180 or 270")
     if "output" in disp and not (isinstance(disp["output"], str) and OUTPUT_RE.match(disp["output"])):
         errs.append("display.output: a connector name like HDMI-A-1")
+    if "span" in disp:
+        sp = disp["span"]
+        if not (isinstance(sp, list) and 2 <= len(sp) <= 4 and all(isinstance(x, str) and SPAN_RE.match(x) for x in sp)
+                and len(set(sp)) == len(sp)):
+            errs.append("display.span: 2 to 4 different output names, left to right, like DP-1")
+        elif disp.get("layout") == "arch":
+            errs.append("display.span: only works with the screen layout")
     if "scale" in disp:
         sc = disp["scale"]
         if isinstance(sc, bool) or not isinstance(sc, (int, float)) or not 0.25 <= sc <= 4:

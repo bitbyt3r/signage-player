@@ -71,7 +71,7 @@ const ZIP_CACHE = "signage-preview-zips";
 self.addEventListener("message", (e) => {
   const d = e.data || {};
   if (d.type === "preview" && d.id) {
-    const s = { content: d.content, layout: d.layout || "screen", updated: Date.now() };
+    const s = { content: d.content, layout: d.layout || "screen", outputs: d.outputs || null, updated: Date.now() };
     sessions.set(d.id, s);
     e.waitUntil(caches.open(SESSION_CACHE).then((c) => c.put(`/__preview/${d.id}`, new Response(JSON.stringify(s)))));
     for (const p of d.content?.packages || []) zipFor(p).catch(() => {}); // start downloads early
@@ -186,13 +186,17 @@ async function previewResponse(e, url) {
   const p = url.pathname;
   if (p === "/content.json") return s ? json(s.content) : json({ error: "preview closed" }, 404);
   if (p === "/perf") return new Response(null, { status: 204 });
-  if (p === "/status/display.json") return json({ layout: s?.layout || "screen" });
+  if (p === "/status/display.json") {
+    return json({ layout: s?.layout || "screen", ...(s?.outputs ? { span: s.outputs.map((o) => o.name) } : {}) });
+  }
   if (p === "/status/status.json") {
     return json({ hostname: "Preview", version: "dashboard preview", addresses: "this browser",
       clock: new Date().toLocaleString(), config: "the program editor's unsaved program", display: s?.layout || "screen" });
   }
   if (p === "/status/agent.json") return json({ state: "connected", last_ok: Date.now(), last_attempt: Date.now() });
   if (p === "/status/update.json") return json({}); // no OS update running
+  // [display] span: the monitors side by side; a 404 means one screen.
+  if (p === "/status/outputs.json") return s?.outputs ? json(s.outputs) : new Response("", { status: 404 });
   if (p.startsWith("/status/")) return new Response("", { status: 404 });
   return null;
 }

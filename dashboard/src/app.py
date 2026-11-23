@@ -699,6 +699,25 @@ def device_perf(req, did):
 # signage-web does on a device; this resolves the content exactly as a device
 # check-in would (optionally with a real device's parameters and layout).
 
+def span_outputs(disp, connected):
+    """[display] span as the player's /status/outputs.json: the outputs side
+    by side, left to right, each at its current mode (1920x1080 if unknown),
+    rotated and scaled like the device does."""
+    modes = {o.get("name"): o.get("current") or "" for o in connected}
+    rot = disp.get("rotation") or 0
+    scale = float(disp.get("scale") or 1) or 1
+    out, x = [], 0
+    for name in disp["span"]:
+        m = re.match(r"^(\d+)x(\d+)", modes.get(name) or disp.get("mode") or "")
+        w, hgt = (int(m[1]), int(m[2])) if m else (1920, 1080)
+        if rot in (90, 270):
+            w, hgt = hgt, w
+        w, hgt = round(w / scale), round(hgt / scale)
+        out.append({"name": name, "x": x, "y": 0, "width": w, "height": hgt})
+        x += w
+    return out
+
+
 @route("POST", "/api/preview")
 def preview_content(req):
     body = req.json()
@@ -709,13 +728,19 @@ def preview_content(req):
     clean, errs = validate.program({**draft, "name": (draft.get("name") or "").strip() or "Preview", "layers": layers})
     if errs:
         raise HttpError(400, "the program has problems", {"errors": errs})
-    layout, params, device = "screen", {}, None
+    layout, params, device, outputs = "screen", {}, None, None
     if body.get("device_id"):
         dev = device_item(str(body["device_id"]))
         params = c.loads(dev.get("params"), {})
-        layout = c.loads(dev.get("settings"), {}).get("display", {}).get("layout") or "screen"
-        device = device_view(dev)
+        device = device_view(dev, full=True)
+        base = (device["status"].get("config") or {}).get("base") or {}
+        disp = {**(base.get("display") or {}), **device["settings"].get("display", {})}
+        layout = disp.get("layout") or "screen"
+        if layout == "screen" and isinstance(disp.get("span"), list):
+            outputs = span_outputs(disp, device["summary"]["display"].get("outputs") or [])
     if body.get("layout") in ("screen", "arch"):
+        if body["layout"] != layout:
+            outputs = None
         layout = body["layout"]
     content = resolve_content({"program_id": "preview", "params": c.dumps(params)},
                               program={**clean, "id": draft.get("id") or "preview"})
@@ -727,7 +752,7 @@ def preview_content(req):
         p["url"] = c.s3().generate_presigned_url(
             "get_object", Params={"Bucket": c.BUCKET, "Key": f"packages/{p['id']}/{p['version']}.zip"}, ExpiresIn=3600)
     disp = (device or {}).get("summary", {}).get("display", {}) if device else {}
-    return resp(200, {"content": content, "layout": layout,
+    return resp(200, {"content": content, "layout": layout, "outputs": outputs,
                       "device": {"name": device["name"], "display": disp} if device else None})
 
 

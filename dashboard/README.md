@@ -141,7 +141,10 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   same rules as the device's `signage-config`, and the device checks them
   again before applying. If a network change means the device can't reach
   the dashboard for 5 minutes, it restores the previous settings and says so
-  on its page.
+  on its page. *Span monitors* (`[display] span`, screen layout only) shows
+  one page across 2 to 4 of the device's connected outputs, picked and
+  ordered left to right; the program preview, shown as that device, is
+  sized to match.
 - **Programs**: a program is a stack of layers. Each layer plays its
   graphics in order for their duration (0 = stay until replaced), animating
   the current one out before the next one in. Graphics can be limited to

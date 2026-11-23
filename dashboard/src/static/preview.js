@@ -56,7 +56,7 @@ export function previewPanel(getDraft) {
     h("div", { class: "row preview-tools" }, asSel, reload, pop),
     stage, status, err);
 
-  let layout = null, src = "", timer = null, refresh = null, seq = 0, stopped = false, started = false;
+  let layout = null, size = null, src = "", timer = null, refresh = null, seq = 0, stopped = false, started = false;
 
   api("GET", "/api/devices").then((r) => {
     const devs = r.devices || [];
@@ -68,7 +68,7 @@ export function previewPanel(getDraft) {
   }).catch(() => {});
 
   function fit() {
-    const [w, hgt] = SIZES[layout || "screen"];
+    const [w, hgt] = size || SIZES[layout || "screen"];
     stage.style.aspectRatio = `${w} / ${hgt}`;
     frame.style.width = `${w}px`;
     frame.style.height = `${hgt}px`;
@@ -88,16 +88,21 @@ export function previewPanel(getDraft) {
     try {
       const [r, sw] = await Promise.all([api("POST", "/api/preview", body), worker()]);
       if (n !== seq || stopped) return;
-      await post(sw, { type: "preview", id: sid, content: r.content, layout: r.layout });
+      await post(sw, { type: "preview", id: sid, content: r.content, layout: r.layout, outputs: r.outputs });
+      // A device spanning several monitors: the page is their combined size.
+      const spanSize = r.outputs?.length ? [Math.max(...r.outputs.map((o) => o.x + o.width)), Math.max(...r.outputs.map((o) => o.y + o.height))] : null;
       err.replaceChildren();
-      if (r.layout !== layout) {
+      const spanKey = r.outputs ? r.outputs.map((o) => `${o.name}:${o.width}x${o.height}`).join(",") : "";
+      if (r.layout !== layout || String(spanSize) !== String(size)) {
         layout = r.layout;
+        size = spanSize;
         fit();
       }
-      const url = `/static/player/index.html?preview=${sid}&layout=${layout}${VIEW[layout] || ""}`;
+      // The player reads the outputs once at start, so a new span restarts it.
+      const url = `/static/player/index.html?preview=${sid}&layout=${layout}${VIEW[layout] || ""}${spanKey ? `&span=${encodeURIComponent(spanKey)}` : ""}`;
       if (url !== src) { src = url; frame.src = url; pop.href = url; }
       const items = r.content.layers.reduce((a, l) => a + l.items.length, 0);
-      status.textContent = `${r.device ? `As ${r.device.name}, ` : ""}${layout === "arch" ? "LED arch, as seen" : "1920×1080"} · `
+      status.textContent = `${r.device ? `As ${r.device.name}, ` : ""}${layout === "arch" ? "LED arch, as seen" : size ? `${r.outputs.length} monitors, ${size[0]}×${size[1]}` : "1920×1080"} · `
         + `${items ? `${items} graphic${items === 1 ? "" : "s"}` : "no graphics yet"} · updated ${new Date().toLocaleTimeString()}`;
       started = true;
     } catch (e) {

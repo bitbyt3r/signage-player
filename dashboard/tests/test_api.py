@@ -436,6 +436,28 @@ def test_preview(aws):
     assert [d["id"] for d in call("GET", "/api/devices", None, token)[1]["devices"]] == [did]
 
 
+def test_display_span(aws):
+    token = login()
+    did, dtok = enroll("52:54:00:00:00:44")
+    for bad in (["DP-1"], ["DP-1", "DP-1"], ["DP-1", "bad name"], ["a", "b", "c", "d", "e"], "DP-1,DP-2"):
+        assert call("PATCH", f"/api/devices/{did}", {"settings": {"display": {"span": bad}}}, token)[0] == 400, bad
+    assert call("PATCH", f"/api/devices/{did}", {"settings": {"display": {"span": ["DP-1", "DP-2"], "layout": "arch"}}}, token)[0] == 400
+    s, r = call("PATCH", f"/api/devices/{did}", {"settings": {"display": {"span": ["DP-2", "DP-1"], "rotation": 90}}}, token)
+    assert s == 200 and r["settings"]["display"]["span"] == ["DP-2", "DP-1"]
+    # The device reports its outputs; the preview lays the span out from their current modes.
+    call("POST", "/device/checkin", {"status": {"display": {"outputs": [
+        {"name": "DP-1", "current": "1920x1080@60", "enabled": True},
+        {"name": "DP-2", "current": "2560x1440@60", "enabled": True}]}}}, device=(did, dtok))
+    upload_package(token, make_zip("1.0.0"))
+    draft = {"name": "x", "layers": [{"name": "Main", "layer": 10, "items": [{"package": "magfest-lower-third", "duration": 5}]}]}
+    r = call("POST", "/api/preview", {"program": draft, "device_id": did}, token)[1]
+    assert r["layout"] == "screen"
+    assert r["outputs"] == [{"name": "DP-2", "x": 0, "y": 0, "width": 1440, "height": 2560},
+                            {"name": "DP-1", "x": 1440, "y": 0, "width": 1080, "height": 1920}]
+    assert call("POST", "/api/preview", {"program": draft, "device_id": did, "layout": "arch"}, token)[1]["outputs"] is None
+    assert call("POST", "/api/preview", {"program": draft}, token)[1]["outputs"] is None
+
+
 def test_player_served_for_preview(aws):
     s, body = call("GET", "/static/player/index.html")
     assert s == 200 and "player" in body

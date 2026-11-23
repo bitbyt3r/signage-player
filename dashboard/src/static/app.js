@@ -265,6 +265,35 @@ function settingsForm(dev, onSave) {
   if (s.display?.output && !outputs.some((o) => o.name === s.display.output)) output.append(h("option", { value: s.display.output }, s.display.output));
   output.value = s.display?.output || "";
   const scale = h("input", { type: "number", step: "0.05", min: "0.25", max: "4", value: s.display?.scale ?? "", placeholder: ph("display", "scale", "1.0") });
+  // Span: one page across 2 to 4 monitors, picked and ordered left to right.
+  let span = [...(s.display?.span || [])];
+  const spanBox = h("div", { class: "span-pick" });
+  const spanHint = h("small", { class: "muted" });
+  const drawSpan = () => {
+    const known = outputs.map((o) => o.name);
+    const left = [...new Set([...known, ...span])].filter((n) => !span.includes(n));
+    const add = h("select", { "aria-label": "Add a monitor to the span", onchange: () => { if (add.value) { span.push(add.value); drawSpan(); } } },
+      h("option", { value: "" }, span.length ? "Add the monitor to the right…" : "Add the leftmost monitor…"),
+      left.map((n) => h("option", { value: n }, n)));
+    const mv = (i, d) => { [span[i], span[i + d]] = [span[i + d], span[i]]; drawSpan(); };
+    spanBox.replaceChildren(
+      ...span.map((n, i) => h("span", { class: "chip span-chip" },
+        h("span", { class: "muted small" }, `${i + 1}. `), n,
+        known.includes(n) ? "" : h("span", { class: "muted small" }, " (not connected)"),
+        i > 0 ? h("button", { type: "button", class: "small ghost", title: "Move left", onclick: () => mv(i, -1) }, "←") : "",
+        i < span.length - 1 ? h("button", { type: "button", class: "small ghost", title: "Move right", onclick: () => mv(i, 1) }, "→") : "",
+        h("button", { type: "button", class: "small ghost", title: "Remove", onclick: () => { span.splice(i, 1); drawSpan(); } }, "×"))),
+      span.length < 4 && left.length ? add : "",
+      !span.length && !left.length ? h("span", { class: "muted small" }, "No outputs reported yet.") : "");
+    const arch = (layout.value || base.display?.layout) === "arch";
+    spanHint.textContent = arch && span.length ? "Span only works with the Screen layout."
+      : span.length === 1 ? "Pick at least two monitors, or remove this one to turn spanning off."
+      : span.length ? "One page across these monitors, left to right. Output is ignored while spanning."
+      : base.display?.span ? `Off here; the stick spans ${base.display.span.join(", ")}.` : "Off: every monitor shows the same page.";
+    spanHint.className = (arch && span.length) || span.length === 1 ? "bad small" : "muted small";
+  };
+  layout.addEventListener("change", drawSpan);
+  drawSpan();
 
   const ntpOn = h("input", { type: "checkbox", checked: s.ntp?.servers !== undefined });
   const ntp = h("input", { value: (s.ntp?.servers || []).join(", "), placeholder: "ntp1.venue.lan, 10.0.0.1" });
@@ -316,6 +345,7 @@ function settingsForm(dev, onSave) {
     if (rot.value !== "") disp.rotation = Number(rot.value);
     if (output.value) disp.output = output.value;
     if (scale.value !== "") disp.scale = Number(scale.value);
+    if (span.length) disp.span = [...span];
     if (Object.keys(disp).length) out.display = disp;
     if (ntpOn.checked) out.ntp = { servers: ntp.value.split(/[\s,]+/).filter(Boolean) };
     if (wifiOn.checked) {
@@ -350,6 +380,7 @@ function settingsForm(dev, onSave) {
     h("label", { class: "field" }, h("span", {}, "Rotation"), rot),
     h("label", { class: "field" }, h("span", {}, "Output"), output),
     h("label", { class: "field" }, h("span", {}, "Scale"), scale)),
+  h("div", { class: "field span-field" }, h("span", {}, "Span monitors (one page across several, left to right)"), spanBox, spanHint),
   h("h3", {}, "Network"),
   h("label", { class: "check" }, wifiOn, "Replace the stick's WiFi networks with these"),
   wifiRows,

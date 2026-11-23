@@ -184,3 +184,8 @@ details.preview > summary { cursor: pointer; }
 .preview-status { margin-top: 6px; }
 .upload-results { margin: 8px 0 0; padding-left: 18px; }
 .upload-results li { margin: 2px 0; }
+.span-field { display: grid; gap: 4px; margin: 4px 0 10px; }
+.span-field > span:first-child { font-size: 12px; color: var(--muted); }
+.span-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.span-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px; }
+.span-chip button { padding: 0 6px; }
