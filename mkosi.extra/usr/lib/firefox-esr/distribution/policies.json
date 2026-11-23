@@ -6,6 +6,7 @@
     "DisablePocket": true,
     "DontCheckDefaultBrowser": true,
     "NoDefaultBookmarks": true,
+    "NewTabPage": false,
     "OverrideFirstRunPage": "",
     "OverridePostUpdatePage": "",
     "UserMessaging": {
@@ -18,6 +19,10 @@
     },
     "Preferences": {
       "browser.sessionstore.resume_from_crash": {
+        "Value": false,
+        "Status": "locked"
+      },
+      "browser.newtab.preload": {
         "Value": false,
         "Status": "locked"
       },
