@@ -30,15 +30,15 @@ Built from the theme team's Asset Pack 01 and style guide. The art in
 | `trihard.png` | Icon-Trihard-Render-Glow-Shadow-NoBackground.png (sessions on now) |
 | `pixel-tomi.png` | Character Illustrations/Pixel-Tomi.png (next to "Now") |
 | `loot-presenting.png` | 3D Character Renders/Loot-Presenting.png (beside the clock) |
-| `hyut-run.png` | 3D Character Renders/Hyut-Run.png (runs along the bottom on page changes) |
+| `n64-logo-spin.webm`, `.mp4` | Random/N64-Logo-Spin-01-0001-0250.mp4, cropped to the logo (a spinning badge beside the clock) |
 | `HyliaSerifBeta-Regular.otf`, `NotoSans-Variable.ttf` | Fonts/ (headings and body, as the style guide says) |
 
 Colours are the style guide's theme colours (gold #E4BC60, greens #2F9445 and
 #0E5135, brown #301E12). The guide's sub-heading font, Chiaro, isn't in the
 pack, so sub-headings use Hylia Serif. Animations: the logo pops in, the
 divider draws out, the cards rise in order and Loot hops up beside the
-clock; Tomi floats, the last full heart beats, the Trihards glint, and Hyut
-runs across the bottom whenever the page changes. `"theme": "plain"` gives
+clock and the N64 badge spins in; Tomi floats, the last full heart beats,
+the Trihards glint and the N64 logo keeps spinning. `"theme": "plain"` gives
 the dark version without the art.
 
 ## Settings (the dashboard's *Graphic data*)
@@ -92,6 +92,13 @@ changes (a session ending, the next page) cross-fade the part that changed.
 Custom action `refresh` fetches the schedule now.
 
 ## Packaging
+
+The theme art in `assets/` is not in git (the repo is public and the art
+belongs to the MAGFest theme team). Keep a copy locally, from the asset
+pack, or unzip a released package. Without it, use `"theme": "plain"`.
+The `assets/` folder is git-ignored. The zip built by CI has no art, so upload the
+one built locally.
+
 
 `scripts/package-ograf.sh` writes `dist/ograf/magfest-schedule-<version>.zip`
 for the dashboard's Packages page. Bump `version` in the manifest for each
