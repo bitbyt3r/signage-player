@@ -19,6 +19,7 @@ else
 fi
 
 apply_display() {
+    rm -f "$STATUS_DIR/outputs.json"
     [[ -r $DISPLAY_JSON ]] || return 0
     local mode custom rotation output scale transform
     mode=$(jq -r '.mode // ""' "$DISPLAY_JSON")
@@ -28,19 +29,52 @@ apply_display() {
     scale=$(jq -r '.scale // 1' "$DISPLAY_JSON")
     case $rotation in 90|180|270) transform=$rotation ;; *) transform=normal ;; esac
 
-    local outputs
-    if [[ -n $output ]]; then
+    local all span outputs
+    all=$(wlr-randr | awk '/^[^ ]/ {print $1}')
+    mapfile -t span < <(jq -r '.span // [] | .[]' "$DISPLAY_JSON")
+    if (( ${#span[@]} )); then
+        # [display] span: one page across these outputs, left to right.
+        # cage stretches its one full-screen window over every enabled
+        # output, so turn the others off and place these side by side.
+        outputs=""
+        for o in "${span[@]}"; do
+            if grep -qxF -- "$o" <<<"$all"; then outputs+="$o"$'\n'; else echo "kiosk: span output $o isn't connected" >&2; fi
+        done
+        for o in $all; do
+            grep -qxF -- "$o" <<<"$outputs" || wlr-randr --output "$o" --off || echo "kiosk: couldn't turn off $o" >&2
+        done
+    elif [[ -n $output ]]; then
         outputs=$output
     else
-        outputs=$(wlr-randr | awk '/^[^ ]/ {print $1}')
+        outputs=$all
     fi
     for o in $outputs; do
-        local args=(--output "$o" --transform "$transform" --scale "$scale")
+        local args=(--output "$o" --on --transform "$transform" --scale "$scale")
         if [[ -n $mode ]]; then
             if [[ $custom == true ]]; then args+=(--custom-mode "$mode"); else args+=(--mode "$mode"); fi
         fi
         wlr-randr "${args[@]}" || echo "kiosk: wlr-randr failed for $o" >&2
     done
+    (( ${#span[@]} )) || return 0
+
+    # Side by side, each output's logical size (mode, rotated, / scale).
+    # The player reads outputs.json to tell graphics where each screen is.
+    local x=0 w h list="[]" json
+    json=$(wlr-randr --json) || { echo "kiosk: wlr-randr --json failed" >&2; return 0; }
+    for o in $outputs; do
+        read -r w h < <(jq -r --arg o "$o" '
+            .[] | select(.name == $o) | ((.scale // 1) | if . <= 0 then 1 else . end) as $s
+            | (.modes[] | select(.current)) as $m
+            | (if (.transform | tostring | test("90|270")) then [$m.height, $m.width] else [$m.width, $m.height] end)
+            | map(. / $s | floor) | "\(.[0]) \(.[1])"' <<<"$json" 2>/dev/null)
+        [[ -n ${w:-} ]] || { echo "kiosk: no current mode for $o" >&2; continue; }
+        wlr-randr --output "$o" --pos "$x,0" || echo "kiosk: couldn't place $o" >&2
+        list=$(jq -c --arg o "$o" --argjson x "$x" --argjson w "$w" --argjson h "$h" '. + [{name: $o, x: $x, y: 0, width: $w, height: $h}]' <<<"$list")
+        x=$((x + w))
+    done
+    echo "kiosk: spanning $(jq -r 'map("\(.name) \(.width)x\(.height)+\(.x)") | join(", ")' <<<"$list")" >&2
+    local tmp
+    tmp=$(mktemp "$STATUS_DIR/.outputs.XXXXXX") && jq . <<<"$list" >"$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$STATUS_DIR/outputs.json"
 }
 
 # The dashboard agent's connection, from its /run/signage/agent.json:

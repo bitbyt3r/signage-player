@@ -43,6 +43,12 @@ rotation = 0
 # map the LED controller expects (header at the top left, then the left
 # and right leg strips). With "arch", mode defaults to "3840x2160".
 # layout = "screen"
+# One page across several monitors, e.g. two screens side by side: list
+# the connectors left to right. Other outputs are turned off, and mode,
+# rotation and scale apply to each one. Only with the screen layout.
+# The M715q has two DisplayPort outputs (DP-1, DP-2) and, on some units,
+# a third port module.
+# span = ["DP-1", "DP-2"]
 
 [player]
 # The player plays whatever program the dashboard assigns. With no program

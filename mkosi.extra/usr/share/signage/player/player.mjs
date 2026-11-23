@@ -3,7 +3,7 @@
 // See docs/player.md for the behaviour and the content.json contract.
 import { isEligible, problems } from "./eligibility.mjs";
 import { esc, getJson, dashboardState, startUpdateBar } from "./status.mjs";
-import { setupDisplay, wantedLayout } from "./display.mjs";
+import { setupDisplay, spanOutputs, wantedLayout } from "./display.mjs";
 import { startPerf, markVisible, markHidden } from "./perf.mjs";
 
 const params = new URLSearchParams(location.search);
@@ -282,8 +282,10 @@ const layersEl = document.getElementById("layers");
 // logical canvas sliced to the LED controller. Fixed for the page's life;
 // a change in display.json reloads the page.
 // On a sliced layout every graphic runs once per canvas root (ROOTS).
-const { display: DISPLAY, roots: ROOTS } = setupDisplay((await wantedLayout()) || "screen", layersEl, document.getElementById("frame"));
-log(`layout ${DISPLAY.layout}, canvas ${DISPLAY.width}x${DISPLAY.height}, ${ROOTS.length} cop${ROOTS.length === 1 ? "y" : "ies"}`);
+const LAYOUT = (await wantedLayout()) || "screen";
+const { display: DISPLAY, roots: ROOTS } = setupDisplay(LAYOUT, layersEl, document.getElementById("frame"),
+    LAYOUT === "screen" ? await spanOutputs() : null);
+log(`layout ${DISPLAY.layout}${DISPLAY.outputs ? ` across ${DISPLAY.outputs.map((o) => o.name).join(" + ")}` : ""}, canvas ${DISPLAY.width}x${DISPLAY.height}, ${ROOTS.length} cop${ROOTS.length === 1 ? "y" : "ies"}`);
 const runners = new Map(); // layer key -> LayerRunner
 let content = null, rev = null, contentError = "";
 

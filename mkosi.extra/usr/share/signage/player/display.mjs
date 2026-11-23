@@ -32,6 +32,16 @@ const CANVAS_VIEW = params.get("view") === "canvas";
 export const layoutName = (v) => (v && Object.hasOwn(LAYOUTS, v) ? v : "screen");
 
 /**
+ * The screens one page spans ([display] span): [{name, x, y, width, height}]
+ * in CSS px, left to right, from /status/outputs.json (the kiosk writes it
+ * after placing the outputs). null when the page is on one screen.
+ */
+export async function spanOutputs() {
+    const o = await getJson("/status/outputs.json");
+    return Array.isArray(o) && o.length > 1 ? o : null;
+}
+
+/**
  * The layout the device is set to: ?layout=, else /status/display.json.
  * null when display.json can't be read right now.
  */
@@ -111,13 +121,24 @@ function canvasView(L, layersEl, frameEl) {
  * graphics get as globalThis.signageDisplay, roots the canvas roots a copy
  * of every layer goes into (layersEl first; one more per view).
  */
-export function setupDisplay(layout, layersEl, frameEl) {
+export function setupDisplay(layout, layersEl, frameEl, outputs = null) {
     const L = LAYOUTS[layout];
     const roots = [layersEl];
     let d;
     if (!L) {
         const w = innerWidth, h = innerHeight;
         d = { layout: "screen", width: w, height: h, regions: { screen: [0, 0, w, h] }, visible: [[0, 0, w, h]] };
+        if (outputs) {
+            // One page across several screens: graphics still get one
+            // screen-layout page, plus where each screen is, so they can
+            // keep text off the bezels.
+            d.outputs = outputs.map((o) => ({ name: String(o.name), rect: [o.x, o.y, o.width, o.height] }));
+            document.documentElement.dataset.span = String(outputs.length);
+            // The status screen and update bar go on the first screen.
+            const [x, y, w1, h1] = d.outputs[0].rect;
+            Object.assign(frameEl.style, { left: px(x), top: px(y), width: px(w1), height: px(h1) });
+            frameEl.style.setProperty("--u", px(w1 / 100));
+        }
     } else {
         const [cw, ch] = L.canvas;
         const regions = Object.fromEntries(Object.entries(L.regions).map(([k, r]) => [k, [...r.rect]]));
@@ -168,7 +189,16 @@ export function setupDisplay(layout, layersEl, frameEl) {
         // region like a 16:9 screen of its height.
         frameEl.style.setProperty("--u", px(home[3] * 16 / 9 / 100));
     }
-    if (DEBUG) for (const root of roots) debugOverlay(root, d);
+    if (DEBUG && d.outputs) {
+        const ov = document.createElement("div");
+        ov.id = "debug";
+        for (const o of d.outputs) {
+            const b = box(o.rect, "region");
+            b.textContent = `${o.name} [${o.rect.join(", ")}]`;
+            ov.append(b);
+        }
+        layersEl.append(ov);
+    } else if (DEBUG) for (const root of roots) debugOverlay(root, d);
     globalThis.signageDisplay = Object.freeze(d);
     return { display: d, roots };
 }

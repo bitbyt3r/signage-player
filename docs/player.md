@@ -138,6 +138,31 @@ to `/run/signage/display.json`, and the kiosk links that into `/status/`.
   3840x2160 map the LED controller takes. `signage-config` sets
   `display.mode = "3840x2160"` unless a mode is given.
 
+### One page across several screens
+
+`[display] span = ["DP-1", "DP-2"]` (2 to 4 connectors, left to right,
+screen layout only) puts one page across several monitors. cage stretches
+its one full-screen window over every enabled output, so the kiosk turns
+off the outputs not listed, applies `mode`, `rotation` and `scale` to each
+listed one, and places them side by side with `wlr-randr --pos`. It then
+writes `/status/outputs.json`:
+
+```json
+[{"name": "DP-1", "x": 0, "y": 0, "width": 1920, "height": 1080},
+ {"name": "DP-2", "x": 1920, "y": 0, "width": 1920, "height": 1080}]
+```
+
+The page is one screen-layout page as wide as all of them (3840x1080 for
+two 1080p monitors). Graphics get the usual `signageDisplay` for the screen
+layout, with one extra field, `outputs: [{name, rect: [x, y, w, h]}, ...]`,
+so they can keep text off the bezels. The status screen and update bar go
+on the first screen. `?debug=1` outlines each screen. A connector that
+isn't plugged in is skipped (the kiosk logs it).
+
+Fill cost grows with the pixels: two 1080p screens are about half the
+arch's output, but two 4K screens are twice it, so heavy graphics may not
+hold 60 fps there.
+
 The player reads `display.json` when it starts and on every poll (2 s). If
 the layout changes, it reloads the page. `?layout=screen` or
 `?layout=arch` overrides the file, for testing on a desktop. `?debug=1`
