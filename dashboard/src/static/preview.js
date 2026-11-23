@@ -9,7 +9,10 @@
 let h, api;
 export function initPreview(deps) { ({ h, api } = deps); }
 
-const SIZES = { screen: [1920, 1080], arch: [3840, 2160] };
+// Frame sizes: the arch plays as its canvas (?view=canvas: one copy, the door
+// hatched, scaled to fit), as people see it, not as the controller's output.
+const SIZES = { screen: [1920, 1080], arch: [2760, 2565] };
+const VIEW = { arch: "&view=canvas" };
 const REFRESH_MS = 20000;   // picks up newly activated package versions, renews zip links
 const DEBOUNCE_MS = 450;
 
@@ -91,10 +94,10 @@ export function previewPanel(getDraft) {
         layout = r.layout;
         fit();
       }
-      const url = `/static/player/index.html?preview=${sid}&layout=${layout}`;
+      const url = `/static/player/index.html?preview=${sid}&layout=${layout}${VIEW[layout] || ""}`;
       if (url !== src) { src = url; frame.src = url; pop.href = url; }
       const items = r.content.layers.reduce((a, l) => a + l.items.length, 0);
-      status.textContent = `${r.device ? `As ${r.device.name}, ` : ""}${layout === "arch" ? "LED arch, all three outputs" : "1920×1080"} · `
+      status.textContent = `${r.device ? `As ${r.device.name}, ` : ""}${layout === "arch" ? "LED arch, as seen" : "1920×1080"} · `
         + `${items ? `${items} graphic${items === 1 ? "" : "s"}` : "no graphics yet"} · updated ${new Date().toLocaleTimeString()}`;
       started = true;
     } catch (e) {

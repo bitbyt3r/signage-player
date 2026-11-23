@@ -162,7 +162,8 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   `mkosi.extra/usr/share/signage/player/` (`src/static/player` is a symlink
   to them, so the preview always matches what the signs run). Edits show
   within a couple of seconds; a newly activated package version shows within
-  20 seconds. *Show as* picks a 1920×1080 screen, the LED arch, or a device
+  20 seconds. *Show as* picks a 1920×1080 screen, the LED arch (its canvas
+  as people see it, door opening hatched), or a device
   (its room and other parameters, and its layout). *Pop out* opens it in its
   own window, which keeps following the editor. Nothing is saved and no
   device is created: `POST /api/preview` resolves the draft the way a
