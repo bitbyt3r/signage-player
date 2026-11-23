@@ -7,3 +7,4 @@ mkosi.workspace/
 mkosi.key
 mkosi.crt
 mkosi.signing/
+dist/

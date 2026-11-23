@@ -1,0 +1,137 @@
+{
+  "$schema": "https://ograf.ebu.io/v1/specification/json-schemas/graphics/schema.json",
+  "id": "magfest-schedule",
+  "version": "1.0.0",
+  "name": "MAGFest schedule",
+  "description": "Full-screen schedule from schedule.magfest.net. With rooms set: the current session in each room with a progress bar, up next, and a short list of what's later. With no rooms: the schedule by itself, paging through what's on now and coming up. Cached on the device, so it keeps working offline.",
+  "author": {
+    "name": "MAGFest signage"
+  },
+  "main": "graphic.mjs",
+  "supportsRealTime": true,
+  "supportsNonRealTime": false,
+  "stepCount": 1,
+  "schema": {
+    "type": "object",
+    "properties": {
+      "rooms": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "title": "Rooms",
+        "description": "Rooms to show, by name as on the schedule (\"Panels 1 (Cherry Blossom Ballroom)\"), the name without the part in brackets (\"Panels 1\"), or location ID. Empty shows the whole schedule."
+      },
+      "tracks": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "title": "Only these tracks",
+        "description": "Show only sessions in at least one of these tracks (name or ID). Empty shows every track."
+      },
+      "excludeTracks": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "title": "Hide these tracks",
+        "description": "Hide sessions in any of these tracks (name or ID)."
+      },
+      "abbreviate": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 0,
+        "title": "Abbreviate session names",
+        "description": "Shorten session names in the schedule lists to at most this many characters. 0 = no limit (long names are cut to fit the line)."
+      },
+      "title": {
+        "type": "string",
+        "default": "",
+        "title": "Title",
+        "description": "Heading. Empty: the room name for one room, \"Now and next\" for several, \"Schedule\" for no rooms."
+      },
+      "lookaheadHours": {
+        "type": "number",
+        "minimum": 0,
+        "default": 3,
+        "title": "Look ahead (hours)",
+        "description": "Schedule view only: how far ahead the list goes. (With rooms set, the Later list shows as much of the next day as fits.)"
+      },
+      "maxDuration": {
+        "type": "integer",
+        "minimum": 0,
+        "default": 180,
+        "title": "Hide long sessions in progress (minutes)",
+        "description": "Schedule view only: sessions in progress that last longer than this (free play, open rooms) are left out of the list. 0 shows them all."
+      },
+      "pageSeconds": {
+        "type": "number",
+        "minimum": 3,
+        "default": 12,
+        "title": "Seconds per page",
+        "description": "When the schedule or the rooms don't fit on one screen, how long each page shows."
+      },
+      "showDescription": {
+        "type": "boolean",
+        "default": true,
+        "title": "Show description",
+        "description": "For a single room, show the current session's description."
+      },
+      "clock24": {
+        "type": "boolean",
+        "default": false,
+        "title": "24-hour clock"
+      },
+      "timeZone": {
+        "type": "string",
+        "default": "",
+        "title": "Time zone",
+        "description": "IANA time zone, e.g. America/New_York. Empty uses the player's time zone."
+      },
+      "accent": {
+        "type": "string",
+        "default": "#e4405f",
+        "title": "Accent colour"
+      },
+      "background": {
+        "type": "string",
+        "default": "#0e1218",
+        "title": "Background",
+        "description": "Any CSS colour; use a transparent one (rgba(...)) to show layers behind."
+      },
+      "apiBase": {
+        "type": "string",
+        "default": "https://schedule.magfest.net",
+        "title": "Schedule server"
+      },
+      "refreshSeconds": {
+        "type": "integer",
+        "minimum": 30,
+        "default": 120,
+        "title": "Refresh every (seconds)"
+      }
+    }
+  },
+  "customActions": [
+    {
+      "id": "refresh",
+      "name": "Refresh now",
+      "description": "Fetch the schedule again.",
+      "schema": null
+    }
+  ],
+  "actionDurations": [
+    {
+      "type": "playAction",
+      "duration": 1300
+    },
+    {
+      "type": "stopAction",
+      "duration": 700
+    }
+  ]
+}
