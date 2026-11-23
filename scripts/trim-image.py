@@ -3,7 +3,8 @@
 from mkosi.postinst.chroot, before mkosi runs depmod.
 
 - Kernel modules for hardware we don't have (capture cards, InfiniBand,
-  other GPUs, SoC audio, IIO sensors, ISDN/CAN, non-Intel/Realtek WiFi,
+  other GPUs, SoC audio, IIO sensors, ISDN/CAN, WiFi other than Intel,
+  Realtek, Atheros/Qualcomm, MediaTek and Broadcom,
   staging). A module stays if anything we keep depends on it: amdgpu needs
   drivers/media/cec and rc-core, for example.
 - iwlwifi firmware: only the newest API version of each chip. The kernel
@@ -61,7 +62,7 @@ DROP_DIRS = [
     "drivers/net/can",
     "net/can",
 ]
-KEEP_WIRELESS = {"intel", "realtek"}
+KEEP_WIRELESS = {"intel", "realtek", "ath", "mediatek", "broadcom"}
 
 for kdir in sorted((ROOT / "usr/lib/modules").glob("*/kernel")):
     base = kdir.parent
