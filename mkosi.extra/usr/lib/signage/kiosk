@@ -40,10 +40,30 @@ apply_display() {
     done
 }
 
+# The dashboard agent's connection, from its /run/signage/agent.json:
+# sets dash (text, HTML-escaped) and dashcls (a colour).
+dashboard_status() {
+    local a=/run/signage/agent.json now state
+    now=$(date +%s)
+    state=$(jq -r '.state // ""' "$a" 2>/dev/null)
+    case $state in
+        "") dash="agent not running"; dashcls="#8a949c" ;;
+        unconfigured) dash="not configured"; dashcls="#8a949c" ;;
+        connected)
+            dash=$(jq -r --argjson now "$now" '"connected · checked in \(($now - ((.last_ok // .last_attempt) / 1000 | floor)) | if . < 0 then 0 else . end) s ago"' "$a")
+            dashcls="#8be08b" ;;
+        *)
+            dash=$(jq -r 'if .last_ok then "offline since " + (.last_ok / 1000 | floor | strflocaltime("%H:%M")) else "connecting" end
+                          + (if .error then " — " + .error else "" end)' "$a")
+            dashcls="#ffc266" ;;
+    esac
+    dash=$(sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$dash")
+}
+
 # Device status, as status.json (the host page's corner overlay reads it
 # through signage-web) and as a plain status page for non-demo mode.
 write_status() {
-    local tmp version addrs clock ntp config display
+    local tmp version addrs clock ntp config display dash dashcls
     . /usr/lib/os-release
     version=${IMAGE_VERSION:-dev}
     addrs=$(ip -o -4 addr show scope global | awk '{print $2": "$4}' | paste -sd ' ' -)
@@ -55,6 +75,7 @@ write_status() {
     esac
     config=$(jq -r '.source + (if (.errors|length)>0 then " — ERRORS: " + (.errors|join("; ")) else "" end)' /run/signage/config-status.json 2>/dev/null)
     display=$(jq -c . "$DISPLAY_JSON" 2>/dev/null)
+    dashboard_status
 
     tmp=$(mktemp "$STATUS_DIR/.status.XXXXXX") || return
     jq -n --arg hostname "$(hostname)" --arg version "$version" --arg addresses "$addrs" \
@@ -77,12 +98,17 @@ h1{font-size:4vw;margin:0 0 .5em}dt{color:#8aa0b0}dd{margin:0 0 .6em}code{font-s
 <dt>Clock</dt><dd>$clock (${ntp:-unknown})</dd>
 <dt>Config</dt><dd><code>$config</code></dd>
 <dt>Display</dt><dd><code>$display</code></dd>
+<dt>Dashboard</dt><dd style="color:$dashcls">$dash</dd>
 </dl>
 HTML
     chmod 644 "$tmp"; mv -f "$tmp" "$STATUS_DIR/status.html"
 }
 
 apply_display
+# The agent's update progress and connection state, for the host page
+# (signage-web serves this directory as /status/).
+ln -sf /run/signage/update.json "$STATUS_DIR/update.json"
+ln -sf /run/signage/agent.json "$STATUS_DIR/agent.json"
 write_status
 ( while sleep 5; do write_status; done ) &
 

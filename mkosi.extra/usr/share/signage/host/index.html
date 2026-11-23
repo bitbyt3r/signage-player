@@ -5,7 +5,9 @@
   Minimal OGraf host (a preview of the player). Loads the graphic whose
   manifest is given by ?graphic=URL, mounts it on a full-screen transparent
   layer and loops it: play, hold, stop, pause. A small corner overlay shows
-  the device status that the kiosk writes to /status/status.json.
+  the device status that the kiosk writes to /status/status.json and the
+  dashboard agent's connection (/status/agent.json); a bar along the bottom
+  shows an OS update in progress (/status/update.json).
 
   Parameters: graphic=<manifest URL>  data=<JSON for load()>
               hold=<ms, default 6000>  gap=<ms, default 2000>  status=0 hides the overlay
@@ -21,7 +23,17 @@
   #status b { font-size: 1.15vw; }
   #status .k { color: #8aa0b0; }
   #status .err { color: #ff8a80; }
+  #status .ok { color: #8be08b; }
+  #status .warn { color: #ffc266; }
+  #status .dim { color: #8a949c; }
+  #update { position: absolute; left: 0; right: 0; bottom: 0; z-index: 20; height: 3.2vw;
+            background: rgba(0, 0, 0, 0.7); font-size: 1.5vw; }
+  #update .fill { position: absolute; inset: 0 auto 0 0; background: #2f7fd0; transition: width 1s linear; }
+  #update.failed .fill { background: #b03a2e; }
+  #update .label { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 1.5vw;
+                   text-shadow: 0 0 0.3vw #000; }
 </style>
 <div id="layer-main" class="layer"></div>
 <div id="status"></div>
+<div id="update" hidden><div class="fill"></div><div class="label"></div></div>
 <script type="module" src="host.mjs"></script>
