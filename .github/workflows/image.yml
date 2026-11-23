@@ -6,6 +6,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    # The repository's default token is read-only; the Release step creates
+    # the GitHub release for tags.
+    permissions:
+      contents: write
     # Signing secrets live in the protected `release` environment. Pull
     # requests don't get them and build with a throwaway dev key instead.
     environment: ${{ github.event_name != 'pull_request' && 'release' || '' }}
