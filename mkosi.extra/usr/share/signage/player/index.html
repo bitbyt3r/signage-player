@@ -11,6 +11,8 @@
   Parameters: demo=1     play the demo lower third when no program is assigned
               status=0   never show the status screen (black instead)
               layout=    screen or arch: overrides [display] layout (testing)
+              view=canvas  sliced layouts: show the canvas scaled to fit, hidden
+                         areas hatched, instead of the controller's output map
               debug=1    outline the layout's regions
 -->
 <style>
@@ -27,6 +29,9 @@
   #output > div { position: absolute; }
   #output .mask { background: #000; z-index: 1; }
   #output .view { overflow: hidden; z-index: 2; }
+  /* ?view=canvas: canvas areas no LED shows. */
+  #stage .hatch { position: absolute; z-index: 999999; pointer-events: none;
+                  background: repeating-linear-gradient(45deg, #2a2a2a 0 24px, #1a1a1a 24px 48px); }
 
   /* ?debug=1: region outlines, drawn on the canvas (so slices show them too). */
   #debug { position: absolute; inset: 0; z-index: 2147483000; pointer-events: none; }

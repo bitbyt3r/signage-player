@@ -218,6 +218,11 @@ shadow DOM, so its CSS can use them. Each layer's container fills the
 canvas, so `vw` and `vh` in a graphic still mean the 3840x2160 viewport.
 Use `%` of the host, or the properties above, instead.
 
+`?view=canvas` (with `?layout=arch` or on an arch device) shows the canvas
+as people see the arch instead of the controller's output map: one copy,
+scaled to fit the window, with the door opening hatched. Graphics get the
+same `signageDisplay`. The dashboard's program preview uses it.
+
 To design for the arch, open `scripts/ograf-preview.html?layout=arch`. It
 renders the graphic on the canvas with the door opening hatched, and can
 show the sliced output (in Firefox; the preview still uses `-moz-element`

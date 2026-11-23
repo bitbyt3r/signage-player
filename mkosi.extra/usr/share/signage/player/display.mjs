@@ -23,6 +23,11 @@ import { getJson } from "./status.mjs";
 const params = new URLSearchParams(location.search);
 const OVERRIDE = params.get("layout");
 const DEBUG = params.get("debug") === "1";
+// ?view=canvas: show a sliced layout's canvas as people see it (the
+// dashboard's preview) instead of the controller's output map: no copies,
+// the canvas scaled to fit the window, hidden areas hatched. Graphics get
+// the same signageDisplay either way.
+const CANVAS_VIEW = params.get("view") === "canvas";
 
 export const layoutName = (v) => (v && Object.hasOwn(LAYOUTS, v) ? v : "screen");
 
@@ -64,6 +69,41 @@ function debugOverlay(root, d) {
     root.append(ov);
 }
 
+function setCanvasVars(root, L) {
+    const [cw, ch] = L.canvas;
+    root.dataset.layout = Object.keys(LAYOUTS).find((k) => LAYOUTS[k] === L);
+    Object.assign(root.style, { width: px(cw), height: px(ch) });
+    root.style.setProperty("--canvas-w", px(cw));
+    root.style.setProperty("--canvas-h", px(ch));
+    for (const [k, r] of Object.entries(L.regions)) {
+        root.style.setProperty(`--${k}-w`, px(r.rect[2]));
+        root.style.setProperty(`--${k}-h`, px(r.rect[3]));
+    }
+}
+
+// ?view=canvas: one copy of the canvas, hidden areas hatched over it, the
+// status screen in the first region, everything scaled to fit the window.
+function canvasView(L, layersEl, frameEl) {
+    const [cw, ch] = L.canvas;
+    setCanvasVars(layersEl, L);
+    const stage = document.createElement("div");
+    stage.id = "stage";
+    Object.assign(stage.style, { position: "absolute", left: 0, top: 0, width: px(cw), height: px(ch), transformOrigin: "0 0" });
+    layersEl.before(stage);
+    stage.append(layersEl);
+    for (const rect of Object.values(L.hidden || {})) stage.append(box(rect, "hatch"));
+    const home = Object.values(L.regions)[0].rect;
+    Object.assign(frameEl.style, { left: px(home[0]), top: px(home[1]), width: px(home[2]), height: px(home[3]) });
+    frameEl.style.setProperty("--u", px(home[3] * 16 / 9 / 100));
+    stage.append(frameEl);
+    const fit = () => {
+        const k = Math.min(innerWidth / cw, innerHeight / ch);
+        stage.style.transform = `translate(${px((innerWidth - cw * k) / 2)}, ${px((innerHeight - ch * k) / 2)}) scale(${k})`;
+    };
+    fit();
+    addEventListener("resize", fit);
+}
+
 /**
  * Lay out the page for `layout`. layersEl is the canvas the graphics render
  * into; frameEl holds the status screen and the update bar and is put where
@@ -83,6 +123,12 @@ export function setupDisplay(layout, layersEl, frameEl) {
         const regions = Object.fromEntries(Object.entries(L.regions).map(([k, r]) => [k, [...r.rect]]));
         d = { layout, width: cw, height: ch, regions, visible: Object.values(regions) };
         document.documentElement.dataset.layout = layout;
+        if (CANVAS_VIEW) {
+            canvasView(L, layersEl, frameEl);
+            if (DEBUG) debugOverlay(layersEl, d);
+            globalThis.signageDisplay = Object.freeze(d);
+            return { display: d, roots };
+        }
 
         // The output, front to back: views, then a black mask over the
         // canvas outside the regions that are shown in place.
@@ -102,16 +148,7 @@ export function setupDisplay(layout, layersEl, frameEl) {
             out.append(view);
             roots.push(root);
         }
-        for (const root of roots) {
-            root.dataset.layout = layout;
-            Object.assign(root.style, { width: px(cw), height: px(ch) });
-            root.style.setProperty("--canvas-w", px(cw));
-            root.style.setProperty("--canvas-h", px(ch));
-            for (const [k, r] of Object.entries(L.regions)) {
-                root.style.setProperty(`--${k}-w`, px(r.rect[2]));
-                root.style.setProperty(`--${k}-h`, px(r.rect[3]));
-            }
-        }
+        for (const root of roots) setCanvasVars(root, L);
         // Mask: the canvas area that isn't one of the in-place regions.
         // Done as the in-place rects' complement, one strip per edge of the
         // bounding box (fine for the single in-place header).
