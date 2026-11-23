@@ -91,3 +91,28 @@ dl.kv dt { color: var(--muted); } dl.kv dd { margin: 0; overflow-wrap: anywhere;
   .grid2 { grid-template-columns: 1fr; }
 }
 [hidden] { display: none !important; }
+.panel.inset { background: var(--bg); margin: 8px 0; padding: 12px; }
+.params { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0 14px; }
+.param.wide { grid-column: 1 / -1; }
+.param small { font-size: 12px; line-height: 1.35; }
+.param button.ghost { margin: -4px 0 10px; }
+.param-pkg + .param-pkg { border-top: 1px solid var(--line); margin-top: 8px; }
+h3.small-h { font-size: 13px; margin: 12px 0 6px; color: var(--muted); font-weight: 600; }
+.picker { position: relative; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-height: 36px;
+  padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); cursor: text; }
+.picker .chips { display: contents; }
+.picker .pick-input { flex: 1 1 140px; min-width: 120px; border: 0; padding: 4px; background: transparent; outline: none; box-shadow: none; }
+.pick-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; padding: 2px 4px 2px 9px; font-size: 13px; }
+.chip-x { border: 0; background: none; padding: 0 4px; cursor: pointer; color: var(--muted); font-size: 15px; line-height: 1; }
+.chip-x:hover { color: var(--bad); }
+.pick-list { position: absolute; z-index: 15; left: -1px; right: -1px; top: calc(100% + 2px); max-height: 260px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+.pick-opt { padding: 6px 10px; cursor: pointer; }
+.pick-opt.active, .pick-opt:hover { background: var(--chip); }
+.pick-opt.free { font-style: italic; }
+.pick-status { padding: 6px 10px; }
+.color-field { gap: 6px; flex-wrap: nowrap; }
+.color-field input[type=color] { width: 40px; height: 34px; padding: 2px; flex: none; }
+.color-field input[type=color].unset { opacity: .3; }
+.color-field input:not([type=color]) { min-width: 0; flex: 1; }
+.param input[type=checkbox] { justify-self: start; width: auto; }

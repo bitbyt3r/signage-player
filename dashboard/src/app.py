@@ -194,6 +194,7 @@ def device_view(item, full=False):
         "clock_offset": float(item.get("clock_offset", 0)),
         "os_version": status.get("os_version", ""),
         "settings": settings,
+        "params": c.loads(item.get("params"), {}),
         "settings_rev": int(item.get("settings_rev", 0)),
         "applied_settings_rev": int(item.get("applied_settings_rev", 0)),
         "content_rev": item.get("content_rev", ""),
@@ -240,7 +241,7 @@ def patch_device(req, did):
     body = req.json()
     changes = {}
     if "settings" in body:
-        clean, errs = validate.settings(body["settings"] or {})
+        clean, errs = validate.settings(resolve_saved_wifi(body["settings"] or {}))
         if errs:
             raise HttpError(400, "invalid settings", {"errors": errs})
         if clean != c.loads(item.get("settings"), {}):
@@ -253,6 +254,8 @@ def patch_device(req, did):
         changes["program_id"] = pid
     if "notes" in body:
         changes["notes"] = str(body["notes"])[:2000]
+    if "params" in body:
+        changes["params"] = c.dumps(check_params(body["params"]))
     if changes:
         item = c.update(item["pk"], "META", changes)
     return resp(200, device_view(item, full=True))
@@ -383,6 +386,7 @@ def resolve_content(item):
         return content
     p = c.loads(prog["data"])
     content["program"] = {"id": pid, "name": p["name"]}
+    params = c.loads(item.get("params"), {})   # per-device graphic parameters, by package
     pkgs, vers, need = {}, {}, {}
     for layer in p["layers"]:
         items = []
@@ -406,6 +410,8 @@ def resolve_content(item):
                 continue
             need[key] = ver
             out = {k: v for k, v in it.items() if k != "version"}
+            if params.get(pkg_id):
+                out["data"] = {**(it.get("data") or {}), **params[pkg_id]}
             out.update({"package": pkg_id, "version": version, "main": ver.get("main", ""),
                         "manifest": ver.get("manifest_file", "")})
             items.append(out)
@@ -491,6 +497,24 @@ def checkin(req):
                 ExpiresIn=3600)
         out["content"] = content
     return resp(200, out)
+
+
+def check_params(params):
+    """Per-device graphic parameters: {package id: {parameter: value}}. They
+    replace the program's values for every item of that package."""
+    if not isinstance(params, dict):
+        raise HttpError(400, "params must be an object")
+    out = {}
+    for pkg, vals in params.items():
+        if not isinstance(pkg, str) or not validate.SLUG_RE.match(pkg):
+            raise HttpError(400, f"params: bad package id {pkg!r}")
+        if not isinstance(vals, dict):
+            raise HttpError(400, f"params.{pkg} must be an object")
+        if vals:
+            out[pkg] = vals
+    if len(c.dumps(out)) > 64000:
+        raise HttpError(400, "params are too large")
+    return out
 
 
 # ------------------------------------------------------------------ programs
@@ -634,6 +658,9 @@ def package_import(req):
            "main": manifest["main"].lstrip("./"), "manifest_file": mfile, "root": root,
            "name": manifest.get("name", ""), "description": manifest.get("description", ""),
            "schema": manifest.get("schema") if isinstance(manifest.get("schema"), dict) else None,
+           # Items are stored as sorted JSON, so keep the manifest's parameter order for forms.
+           "schema_order": list((manifest.get("schema") or {}).get("properties") or {})
+           if isinstance(manifest.get("schema"), dict) and isinstance(manifest["schema"].get("properties"), dict) else [],
            "manifest": manifest}
     c.put({"pk": f"PKG#{pkg_id}", "sk": f"VER#{version}", "data": c.dumps(ver)})
     meta = c.get(f"PKG#{pkg_id}")
@@ -767,23 +794,159 @@ def release_image(req, tag):
     return resp(200, st)
 
 
-@route("POST", "/api/stick-config")
-def stick_config(req):
-    """Render a config.toml for a new install stick, enrolled in this dashboard."""
-    body = req.json()
+# ------------------------------------------------------------------ saved WiFi and stick defaults
+# Saved networks keep their password on the server. The API never sends a
+# saved password back to the browser; it is only written into a generated
+# config.toml or a device's settings, which need it. Settings anywhere can
+# name a saved network as {"saved": "<id>"} instead of spelling it out.
+
+def wifi_view(item):
+    w = c.loads(item["data"])
+    return {"id": w["id"], "ssid": w["ssid"], "priority": w.get("priority", 0), "hidden": w.get("hidden", False),
+            "has_psk": bool(w.get("psk")), "updated": w.get("updated")}
+
+
+def saved_wifi(wid):
+    item = c.get(f"WIFI#{wid}") if isinstance(wid, str) and re.fullmatch(r"[0-9a-f]{4,32}", wid) else None
+    return c.loads(item["data"]) if item else None
+
+
+def resolve_saved_wifi(settings):
+    """Replace {"saved": id} entries in network.wifi with the stored network."""
+    wifi = settings.get("network", {}).get("wifi") if isinstance(settings, dict) and isinstance(settings.get("network"), dict) else None
+    if not isinstance(wifi, list) or not any(isinstance(w, dict) and "saved" in w for w in wifi):
+        return settings
+    out, errs = [], []
+    for i, w in enumerate(wifi):
+        if isinstance(w, dict) and "saved" in w:
+            sw = saved_wifi(w["saved"])
+            if not sw:
+                errs.append(f"network.wifi[{i}]: that saved network was deleted")
+                continue
+            out.append({k: sw[k] for k in ("ssid", "psk", "priority", "hidden") if k in sw})
+        else:
+            out.append(w)
+    if errs:
+        raise HttpError(400, "invalid settings", {"errors": errs})
+    return {**settings, "network": {**settings["network"], "wifi": out}}
+
+
+def check_wifi(w, keep_psk=None):
+    if not isinstance(w, dict):
+        raise HttpError(400, "network must be an object")
+    net = {"ssid": w.get("ssid"), "priority": w.get("priority", 0), "hidden": w.get("hidden", False),
+           "psk": keep_psk if w.get("psk") is None and keep_psk is not None else (w.get("psk") or "")}
+    clean, errs = validate.settings({"network": {"wifi": [net]}})
+    if errs:
+        raise HttpError(400, "invalid network", {"errors": [e.replace("network.wifi[0].", "") for e in errs]})
+    return clean["network"]["wifi"][0]
+
+
+@route("GET", "/api/wifi")
+def list_wifi(req):
+    nets = sorted((wifi_view(i) for i in c.by_kind("wifi")), key=lambda w: (-w["priority"], w["ssid"].lower()))
+    return resp(200, {"networks": nets})
+
+
+@route("POST", "/api/wifi")
+def create_wifi(req):
+    net = check_wifi(req.json())
+    net.update(id=c.new_id(), updated=c.now())
+    c.put({"pk": f"WIFI#{net['id']}", "sk": "META", "kind": "wifi", "data": c.dumps(net)})
+    return resp(201, wifi_view({"data": c.dumps(net)}))
+
+
+@route("PUT", "/api/wifi/{wid}")
+def put_wifi(req, wid):
+    """Update a saved network. Leave psk out (or null) to keep the stored password."""
+    old = saved_wifi(wid)
+    if not old:
+        raise HttpError(404, "no such saved network")
+    net = check_wifi(req.json(), keep_psk=old.get("psk", ""))
+    net.update(id=wid, updated=c.now())
+    c.put({"pk": f"WIFI#{wid}", "sk": "META", "kind": "wifi", "data": c.dumps(net)})
+    return resp(200, wifi_view({"data": c.dumps(net)}))
+
+
+@route("DELETE", "/api/wifi/{wid}")
+def delete_wifi(req, wid):
+    if not saved_wifi(wid):
+        raise HttpError(404, "no such saved network")
+    c.delete(f"WIFI#{wid}")
+    return resp(200, {"ok": True})
+
+
+URL_RE = re.compile(r"^https?://[A-Za-z0-9.-]+(:\d{1,5})?(/[^\s]*)?$")
+
+
+def stick_options(body, errs):
+    """Validate the stick settings shared by defaults and stick-config."""
     settings = {k: body[k] for k in ("device", "network", "ntp", "display") if k in body}
-    clean, errs = validate.settings(settings)
+    clean, e = validate.settings(settings)
+    errs += e
     countdown = body.get("countdown", 15)
     if not validate.is_int(countdown) or not 0 <= countdown <= 600:
         errs.append("install countdown must be 0 to 600 seconds")
     mok = body.get("mok_password") or "signage"
     if not isinstance(mok, str) or not 1 <= len(mok) <= 256:
         errs.append("Secure Boot enrollment password must be 1 to 256 characters")
+    url = (body.get("dashboard_url") or "").strip().rstrip("/")
+    if url and not URL_RE.match(url):
+        errs.append("dashboard address must look like https://signs.example.org")
+    return clean, countdown, mok, url
+
+
+@route("GET", "/api/stick-defaults")
+def get_stick_defaults(req):
+    item = c.get("CONFIG", "STICK")
+    d = c.loads(item["data"]) if item else {}
+    known = {i["pk"][5:] for i in c.by_kind("wifi")}
+    d["wifi"] = [w for w in d.get("wifi", []) if w in known]
+    return resp(200, {"defaults": d, "enroll_token_set": bool(ENROLL_TOKEN), "dashboard_url": req.base_url})
+
+
+@route("PUT", "/api/stick-defaults")
+def put_stick_defaults(req):
+    """Saved defaults for the Install images form. WiFi is a list of saved
+    network ids; the device name is per stick and isn't kept."""
+    body = req.json()
+    if not isinstance(body, dict):
+        raise HttpError(400, "body must be an object")
+    errs = []
+    wifi = body.get("wifi", [])
+    if not isinstance(wifi, list) or not all(isinstance(w, str) for w in wifi):
+        errs.append("wifi must be a list of saved network ids")
+        wifi = []
+    missing = [w for w in wifi if not saved_wifi(w)]
+    if missing:
+        errs.append("a selected WiFi network was deleted; reload the page")
+    body = {k: v for k, v in body.items() if k != "wifi"}
+    if isinstance(body.get("device"), dict):
+        body["device"] = {k: v for k, v in body["device"].items() if k != "name"}
+    clean, countdown, mok, url = stick_options(body, errs)
+    if errs:
+        raise HttpError(400, "invalid settings", {"errors": errs})
+    d = {"device": clean.get("device", {}), "display": clean.get("display", {}),
+         "ntp": clean.get("ntp", {}), "countdown": countdown, "mok_password": mok,
+         "dashboard_url": url, "wifi": wifi, "updated": c.now()}
+    c.put({"pk": "CONFIG", "sk": "STICK", "data": c.dumps(d)})
+    return resp(200, {"defaults": d})
+
+
+@route("POST", "/api/stick-config")
+def stick_config(req):
+    """Render a config.toml for a new install stick, enrolled in this dashboard."""
+    body = req.json()
+    if not isinstance(body, dict):
+        raise HttpError(400, "body must be an object")
+    body = resolve_saved_wifi(body)
+    errs = []
+    clean, countdown, mok, url = stick_options(body, errs)
     if errs:
         raise HttpError(400, "invalid settings", {"errors": errs})
     cfg = {
         "device": {"timezone": "America/New_York", **clean.get("device", {})},
-        "dashboard": {"url": req.base_url, "enroll_token": ENROLL_TOKEN},
+        "dashboard": {"url": url or req.base_url, "enroll_token": ENROLL_TOKEN},
         "network": {"wifi": clean.get("network", {}).get("wifi", [])},
         "ntp": {"servers": clean.get("ntp", {}).get("servers", [])},
         "display": {"rotation": 0, **clean.get("display", {})},
@@ -795,3 +958,49 @@ def stick_config(req):
               "# Edit on any computer. Settings changed later from the dashboard\n"
               "# override what is here.\n")
     return resp(200, {"config": tomlw.dumps(cfg, header)})
+
+
+# ------------------------------------------------------------------ parameter options
+# Lists offered by searchable inputs for graphic parameters marked in the
+# manifest schema with "x-signage-options". Fetched here rather than in the
+# browser so the source's CORS settings don't matter.
+
+OPTION_SOURCES = {"schedule": {"locations": "/locations?limit=-1", "tracks": "/tracks?limit=-1"}}
+_options_cache = {}
+
+
+@route("GET", "/api/options")
+def param_options(req):
+    source, lst = req.query.get("source", ""), req.query.get("list", "")
+    base = (req.query.get("base") or "https://schedule.magfest.net").strip().rstrip("/")
+    path = OPTION_SOURCES.get(source, {}).get(lst)
+    if not path:
+        raise HttpError(400, "unknown option list")
+    if not URL_RE.match(base) or not base.startswith("https://"):
+        raise HttpError(400, "the server address must be an https:// URL")
+    key = (base, path)
+    hit = _options_cache.get(key)
+    if hit and time.time() - hit[0] < 300:
+        return resp(200, hit[1])
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(base + path, headers={
+            "Accept": "application/json", "User-Agent": "signage-dashboard"}), timeout=10)
+        data = json.loads(r.read(5_000_000))
+    except Exception as e:
+        raise HttpError(502, f"couldn't load {lst} from {base}: {e}")
+    if isinstance(data, dict):
+        data = next((v for v in data.values() if isinstance(v, list)), [])
+    opts, seen = [], set()
+    for x in data if isinstance(data, list) else []:
+        if not isinstance(x, dict) or x.get("name") in (None, ""):
+            continue
+        name = str(x["name"])
+        if name in seen:
+            continue
+        seen.add(name)
+        opts.append({"value": name, "id": str(x.get("id", "")), "hint": str(x.get("description") or "")[:120]})
+    # Booths are numerous and rarely what a sign shows; list them last.
+    opts.sort(key=lambda o: ("booth" in o["value"].lower(), o["value"].lower()))
+    body = {"options": opts, "source": base + path}
+    _options_cache[key] = (time.time(), body)
+    return resp(200, body)

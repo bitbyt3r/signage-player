@@ -56,7 +56,9 @@ def call(method, path, body=None, token=None, device=None, raw=None):
         headers["authorization"] = f"Bearer {token}"
     if device:
         headers["authorization"] = f"Device {device[0]}:{device[1]}"
-    ev = {"rawPath": path, "headers": headers, "requestContext": {"http": {"method": method, "sourceIp": "203.0.113.5"},
+    path, _, qs = path.partition("?")
+    from urllib.parse import parse_qsl
+    ev = {"rawPath": path, "queryStringParameters": dict(parse_qsl(qs)) or None, "headers": headers, "requestContext": {"http": {"method": method, "sourceIp": "203.0.113.5"},
                                                                    "domainName": "dash.example"},
           "body": raw if raw is not None else (json.dumps(body) if body is not None else None)}
     r = app.handler(ev)
@@ -257,6 +259,90 @@ def test_stick_config(aws):
             out = subprocess.run([sys.executable, str(sc), "--check", f.name], capture_output=True, text=True)
             assert out.returncode == 0, out.stdout
     assert call("POST", "/api/stick-config", {"display": {"rotation": 1}}, token)[0] == 400
+
+
+def test_saved_wifi_and_stick_defaults(aws):
+    import tomllib
+    token = login()
+    assert call("POST", "/api/wifi", {"ssid": "Venue", "psk": "short"}, token)[0] == 400
+    s, w = call("POST", "/api/wifi", {"ssid": "Venue", "psk": "venue-pass-1", "priority": 5}, token)
+    assert s == 201 and w["has_psk"] and "psk" not in w
+    s, o = call("POST", "/api/wifi", {"ssid": "Open"}, token)
+    assert s == 201 and not o["has_psk"]
+    s, r = call("GET", "/api/wifi", None, token)
+    assert [n["ssid"] for n in r["networks"]] == ["Venue", "Open"] and "venue-pass-1" not in json.dumps(r)
+    # Editing without a psk keeps the stored password.
+    s, w2 = call("PUT", f"/api/wifi/{w['id']}", {"ssid": "Venue", "priority": 7}, token)
+    assert s == 200 and w2["has_psk"] and w2["priority"] == 7
+
+    s, r = call("PUT", "/api/stick-defaults", {"device": {"timezone": "America/Chicago", "name": "ignored"},
+                                               "display": {"rotation": 90}, "ntp": {"servers": ["10.0.0.1"]},
+                                               "countdown": 3, "mok_password": "enroll",
+                                               "dashboard_url": "https://signs.example.org/", "wifi": [w["id"], o["id"]]}, token)
+    assert s == 200, r
+    s, r = call("GET", "/api/stick-defaults", None, token)
+    d = r["defaults"]
+    assert d["device"] == {"timezone": "America/Chicago"} and d["display"] == {"rotation": 90}
+    assert d["dashboard_url"] == "https://signs.example.org" and d["wifi"] == [w["id"], o["id"]]
+    assert "venue-pass-1" not in json.dumps(r)
+    assert call("PUT", "/api/stick-defaults", {"wifi": ["deadbeef"]}, token)[0] == 400
+    assert call("PUT", "/api/stick-defaults", {"dashboard_url": "ftp://x"}, token)[0] == 400
+
+    # A stick built from saved networks gets their passwords.
+    s, r = call("POST", "/api/stick-config", {"network": {"wifi": [{"saved": w["id"]}, {"saved": o["id"]}]},
+                                              "dashboard_url": "https://signs.example.org"}, token)
+    assert s == 200, r
+    cfg = tomllib.loads(r["config"])
+    assert cfg["dashboard"]["url"] == "https://signs.example.org"
+    assert cfg["network"]["wifi"][0] == {"ssid": "Venue", "psk": "venue-pass-1", "priority": 7, "hidden": False}
+    # Device settings can use them too.
+    did, _ = enroll()
+    s, r = call("PATCH", f"/api/devices/{did}", {"settings": {"network": {"wifi": [{"saved": w["id"]}]}}}, token)
+    assert s == 200 and r["settings"]["network"]["wifi"][0]["psk"] == "venue-pass-1"
+
+    # Deleted networks drop out of the defaults and can't be used.
+    assert call("DELETE", f"/api/wifi/{o['id']}", None, token)[0] == 200
+    assert call("GET", "/api/stick-defaults", None, token)[1]["defaults"]["wifi"] == [w["id"]]
+    assert call("POST", "/api/stick-config", {"network": {"wifi": [{"saved": o["id"]}]}}, token)[0] == 400
+
+
+def test_device_params_and_options(aws, monkeypatch):
+    token = login()
+    schema = {"type": "object", "properties": {"rooms": {"type": "array", "items": {"type": "string"}, "default": []},
+                                               "title": {"type": "string", "default": ""}}}
+    data = make_zip()
+    upload_package(token, data)
+    pkg = call("GET", "/api/packages", None, token)[1]["packages"][0]
+    s, prog = call("POST", "/api/programs", {"name": "Hall", "layers": [{"name": "Main", "layer": 10, "items": [
+        {"package": pkg["id"], "duration": 0, "data": {"rooms": ["Panels 1"], "title": "Hi"}}]}]}, token)
+    assert s in (200, 201), prog
+    did, dtok = enroll()
+    call("PATCH", f"/api/devices/{did}", {"program_id": prog["id"]}, token)
+    first = call("POST", "/device/checkin", {}, device=(did, dtok))[1]
+    assert first["content"]["layers"][0]["items"][0]["data"] == {"rooms": ["Panels 1"], "title": "Hi"}
+
+    assert call("PATCH", f"/api/devices/{did}", {"params": {"bad id!": {}}}, token)[0] == 400
+    s, r = call("PATCH", f"/api/devices/{did}", {"params": {pkg["id"]: {"rooms": ["Panels 2 (Baltimore 3,4,5)"]}, "other": {}}}, token)
+    assert s == 200 and r["params"] == {pkg["id"]: {"rooms": ["Panels 2 (Baltimore 3,4,5)"]}}
+    second = call("POST", "/device/checkin", {"content_rev": first["content_rev"]}, device=(did, dtok))[1]
+    assert second["content_rev"] != first["content_rev"]
+    assert second["content"]["layers"][0]["items"][0]["data"] == {"rooms": ["Panels 2 (Baltimore 3,4,5)"], "title": "Hi"}
+
+    class Fake(io.BytesIO):
+        pass
+    seen = []
+
+    def fake_urlopen(rq, timeout=None):
+        seen.append(rq.full_url)
+        return Fake(json.dumps([{"id": "2", "name": "Panels 2"}, {"id": "9", "name": "Booth 12"},
+                                {"id": "1", "name": "Panels 1"}, {"id": "3"}]).encode())
+    monkeypatch.setattr(app.urllib.request, "urlopen", fake_urlopen)
+    app._options_cache.clear()
+    s, r = call("GET", "/api/options?source=schedule&list=locations&base=https://sched.example/", None, token)
+    assert s == 200 and [o["value"] for o in r["options"]] == ["Panels 1", "Panels 2", "Booth 12"]
+    assert seen == ["https://sched.example/locations?limit=-1"]
+    assert call("GET", "/api/options?source=schedule&list=nope", None, token)[0] == 400
+    assert call("GET", "/api/options?source=schedule&list=tracks&base=http://10.0.0.1", None, token)[0] == 400
 
 
 def test_terminal_ws_auth(aws):

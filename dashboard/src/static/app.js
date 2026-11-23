@@ -1,7 +1,10 @@
 // Signage dashboard: a small hash-routed single page app, no build step.
 import { gzImageStream, imageStream, saveStream } from "./image.js";
+import { initParams, overrideForm, schemaForm, withOrder } from "./params.js";
 
 const $main = document.getElementById("main");
+// (h and api are function declarations below, so they're hoisted.)
+initParams({ h, api });
 let info = null;
 let timer = null;
 let cleanup = null;
@@ -261,6 +264,26 @@ function settingsForm(dev, onSave) {
     wifiRows.append(row);
   };
   (s.network?.wifi || []).forEach(addWifi);
+  const addSaved = (n) => {
+    const row = h("div", { class: "fields wifi", "data-saved": n.id },
+      h("label", { class: "field" }, h("span", {}, "SSID"), h("input", { value: n.ssid, disabled: true })),
+      h("label", { class: "field" }, h("span", {}, "Password"), h("input", { value: n.has_psk ? "saved on the dashboard" : "open", disabled: true })),
+      h("label", { class: "field" }, h("span", {}, "Priority"), h("input", { value: n.priority, disabled: true })),
+      h("label", { class: "check" }, h("input", { type: "checkbox", checked: n.hidden, disabled: true }), "Hidden"),
+      h("button", { class: "small ghost danger", type: "button", onclick: () => row.remove() }, "Remove"));
+    wifiRows.append(row);
+  };
+  const savedPick = h("select", { hidden: true, onchange: () => {
+    const n = savedPick._nets.find((x) => x.id === savedPick.value);
+    savedPick.value = "";
+    if (n) { wifiOn.checked = true; addSaved(n); }
+  } });
+  api("GET", "/api/wifi").then((r) => {
+    savedPick._nets = r.networks;
+    if (!r.networks.length) return;
+    savedPick.replaceChildren(h("option", { value: "" }, "Add a saved network…"), ...r.networks.map((n) => h("option", { value: n.id }, n.ssid)));
+    savedPick.hidden = false;
+  }).catch(() => {});
   const err = h("div");
 
   const collect = () => {
@@ -278,7 +301,7 @@ function settingsForm(dev, onSave) {
     if (Object.keys(disp).length) out.display = disp;
     if (ntpOn.checked) out.ntp = { servers: ntp.value.split(/[\s,]+/).filter(Boolean) };
     if (wifiOn.checked) {
-      out.network = { wifi: [...wifiRows.querySelectorAll(".wifi")].map((r) => ({
+      out.network = { wifi: [...wifiRows.querySelectorAll(".wifi")].map((r) => r.dataset.saved ? { saved: r.dataset.saved } : ({
         ssid: r.querySelector("[name=ssid]").value,
         psk: r.querySelector("[name=psk]").value,
         priority: Number(r.querySelector("[name=priority]").value || 0),
@@ -311,7 +334,9 @@ function settingsForm(dev, onSave) {
   h("h3", {}, "Network"),
   h("label", { class: "check" }, wifiOn, "Replace the stick's WiFi networks with these"),
   wifiRows,
-  h("button", { type: "button", class: "small", onclick: () => { wifiOn.checked = true; addWifi(); } }, "Add WiFi network"),
+  h("div", { class: "row" },
+    h("button", { type: "button", class: "small", onclick: () => { wifiOn.checked = true; addWifi(); } }, "Add WiFi network"),
+    savedPick),
   h("p", {}, h("label", { class: "check" }, ntpOn, "Use these NTP servers"), " ", ntp),
   err,
   h("button", { class: "primary", type: "submit" }, "Save settings"));
@@ -409,10 +434,57 @@ async function viewDevice(id) {
 
   const program = h("select", {
     onchange: async (e) => {
-      try { await api("PATCH", `/api/devices/${id}`, { program_id: e.target.value }); toast("Program assigned"); } catch (x) { toast(x.message); }
+      try {
+        dev = { ...dev, ...(await api("PATCH", `/api/devices/${id}`, { program_id: e.target.value })) };
+        toast("Program assigned");
+        drawParams();
+      } catch (x) { toast(x.message); }
     },
   }, h("option", { value: "" }, "No program"), programs.map((p) => h("option", { value: p.id }, p.name)));
   program.value = dev.program_id;
+
+  // Graphic parameters for this device (a room, say), per package in its program.
+  const paramsBox = h("div");
+  const drawParams = async () => {
+    if (!dev.program_id) {
+      paramsBox.replaceChildren(h("p", { class: "muted small" }, "Assign a program to set its graphics' parameters for this device."));
+      return;
+    }
+    let prog, pkgs;
+    try {
+      [prog, pkgs] = await Promise.all([api("GET", `/api/programs/${dev.program_id}`), api("GET", "/api/packages")]);
+    } catch (e) { paramsBox.replaceChildren(h("p", { class: "bad small" }, e.message)); return; }
+    const byId = Object.fromEntries(pkgs.packages.map((x) => [x.id, x]));
+    const used = [];
+    for (const l of prog.layers) for (const it of l.items) {
+      if (!it.package || used.some((u) => u.id === it.package)) continue;
+      const pkg = byId[it.package];
+      const ver = pkg?.versions.find((v) => v.version === (it.version || pkg.active_version));
+      if (ver?.schema?.properties) used.push({ id: it.package, name: pkg.name || it.package, schema: withOrder(ver.schema, ver.schema_order), base: it.data || {} });
+    }
+    if (!used.length) {
+      paramsBox.replaceChildren(h("p", { class: "muted small" }, "None of this program's graphics have parameters."));
+      return;
+    }
+    const forms = used.map((u) => ({ ...u, form: overrideForm(u.schema, dev.params?.[u.id] || {}, u.base) }));
+    const err = h("div");
+    paramsBox.replaceChildren(
+      h("p", { class: "muted small" }, "Values set here replace the program's for this device only, in every item of that graphic."),
+      ...forms.map((f) => h("div", { class: "param-pkg" }, forms.length > 1 ? h("h3", {}, f.name) : "", f.form)),
+      err,
+      h("button", { class: "primary", type: "button", onclick: async () => {
+        err.replaceChildren();
+        const params = { ...(dev.params || {}) };
+        try { for (const f of forms) params[f.id] = f.form.getValue(); }
+        catch (e) { return err.replaceChildren(h("div", { class: "bad" }, e.message)); }
+        for (const k of Object.keys(params)) if (!Object.keys(params[k]).length) delete params[k];
+        try {
+          dev = { ...dev, ...(await api("PATCH", `/api/devices/${id}`, { params })) };
+          toast("Saved; the device picks it up at its next check-in");
+        } catch (e) { err.replaceChildren(h("div", { class: "bad" }, e.message), errorList(e)); }
+      } }, "Save parameters"));
+  };
+  drawParams();
 
   const notes = h("textarea", { style: "min-height:60px", placeholder: "Location, owner, anything useful",
     onchange: async (e) => { await api("PATCH", `/api/devices/${id}`, { notes: e.target.value }); toast("Notes saved"); } });
@@ -440,6 +512,7 @@ async function viewDevice(id) {
         h("div", { class: "panel" }, h("h2", {}, "Content"),
           h("label", { class: "field" }, h("span", {}, "Program"), program),
           h("p", { class: "muted small" }, "Programs set which OGraf graphics play on which layer and how they rotate. ", h("a", { href: "#/programs" }, "Edit programs"))),
+        h("div", { class: "panel" }, h("h2", {}, "Graphic parameters"), paramsBox),
         h("div", { class: "panel" }, h("h2", {}, "Settings"), settingsForm(dev, async (settings) => {
           dev = { ...dev, ...(await api("PATCH", `/api/devices/${id}`, { settings })) };
           toast("Saved; the device applies it at its next check-in");
@@ -560,14 +633,54 @@ async function viewProgram(id) {
       verSel.value = it.version || "";
     };
     fillVersions();
-    const data = h("textarea", {}, JSON.stringify(it.data || {}, null, 2));
-    const fillDefaults = () => {
+    // Graphic data: a form from the version's schema, or JSON for anything the form can't show.
+    const dataBox = h("div");
+    const verSchema = () => {
       const pkg = pkgById[pkgSel.value];
-      const ver = pkg?.versions.find((v) => v.version === (verSel.value || pkg.active_version));
-      data.value = JSON.stringify({ ...schemaDefaults(ver?.schema), ...(JSON.parse(data.value || "{}")) }, null, 2);
+      const v = pkg?.versions.find((x) => x.version === (verSel.value || pkg.active_version));
+      return v?.schema ? withOrder(v.schema, v.schema_order) : null;
     };
-    pkgSel.addEventListener("change", () => { it.package = pkgSel.value; fillVersions(); if (data.value.trim() === "{}") fillDefaults(); });
-    verSel.addEventListener("change", () => (it.version = verSel.value));
+    let form = null;
+    let asJson = false;
+    const jsonToggle = h("button", { type: "button", class: "small ghost" });
+    const drawData = () => {
+      const schema = verSchema();
+      const useJson = asJson || !schema?.properties;
+      jsonToggle.textContent = useJson ? "Edit as a form" : "Edit as JSON";
+      jsonToggle.hidden = !schema?.properties;
+      if (useJson) {
+        const ta = h("textarea", { class: "mono" });
+        ta.value = JSON.stringify(it.data || {}, null, 2);
+        ta.getValue = () => JSON.parse(ta.value || "{}");
+        form = ta;
+        dataBox.replaceChildren(h("label", { class: "field" }, h("span", {}, "Graphic data (JSON, passed to the OGraf graphic)"), ta));
+      } else {
+        form = schemaForm(schema, it.data || {});
+        dataBox.replaceChildren(form);
+      }
+    };
+    const readData = () => {
+      try { it.data = form.getValue(); return true; } catch { return false; }
+    };
+    jsonToggle.addEventListener("click", () => {
+      if (!readData()) return toast("That isn't valid JSON");
+      asJson = !asJson;
+      drawData();
+    });
+    const fillDefaults = () => {
+      readData();
+      it.data = { ...schemaDefaults(verSchema()), ...(it.data || {}) };
+      drawData();
+    };
+    pkgSel.addEventListener("change", () => {
+      readData();
+      it.package = pkgSel.value;
+      fillVersions();
+      if (!Object.keys(it.data || {}).length) it.data = schemaDefaults(verSchema());
+      drawData();
+    });
+    verSel.addEventListener("change", () => { readData(); it.version = verSel.value; drawData(); });
+    drawData();
     const dur = h("input", { type: "number", min: 0, value: it.duration ?? 30, onchange: (e) => (it.duration = Number(e.target.value)) });
     const label = h("input", { value: it.label || "", placeholder: "Optional", onchange: (e) => (it.label = e.target.value) });
     const field = (k, type) => h("input", { type, value: it[k] || "", onchange: (e) => (it[k] = e.target.value) });
@@ -577,7 +690,7 @@ async function viewProgram(id) {
         e.target.checked ? s.add(i) : s.delete(i);
         it.days = [...s].sort();
       } }), dname)));
-    it._data = data;
+    it._read = readData;
     const el = h("div", { class: "item" },
       h("div", { class: "fields" },
         h("label", { class: "field" }, h("span", {}, "Graphic package"), pkgSel),
@@ -591,9 +704,11 @@ async function viewProgram(id) {
           h("label", { class: "field" }, h("span", {}, "Until time of day"), field("end", "time")),
           h("label", { class: "field" }, h("span", {}, "Starting on"), field("from", "datetime-local")),
           h("label", { class: "field" }, h("span", {}, "Ending on"), field("until", "datetime-local")))),
-      h("label", { class: "field" }, h("span", {}, "Graphic data (JSON, passed to the OGraf graphic)"), data),
+      h("h3", { class: "small-h" }, "Graphic parameters"),
+      dataBox,
       h("div", { class: "row" },
-        h("button", { type: "button", class: "small", onclick: fillDefaults }, "Fill defaults from schema"),
+        jsonToggle,
+        h("button", { type: "button", class: "small", onclick: fillDefaults }, "Fill missing defaults"),
         h("button", { type: "button", class: "small", onclick: () => move(layer.items, it, -1) }, "↑"),
         h("button", { type: "button", class: "small", onclick: () => move(layer.items, it, 1) }, "↓"),
         h("button", { type: "button", class: "small danger", onclick: () => { layer.items.splice(layer.items.indexOf(it), 1); render(); } }, "Remove")));
@@ -622,9 +737,7 @@ async function viewProgram(id) {
 
   function syncData() {
     for (const layer of p.layers) for (const it of layer.items) {
-      if (it._data) {
-        try { it.data = JSON.parse(it._data.value || "{}"); } catch { it._dataError = true; }
-      }
+      if (it._read && !it._read()) it._dataError = true;
     }
   }
 
@@ -635,7 +748,7 @@ async function viewProgram(id) {
     p.layers.forEach((l) => l.items.forEach((it) => delete it._dataError));
     if (bad) return err.replaceChildren(h("div", { class: "bad" }, "One of the graphic data boxes isn't valid JSON."));
     const body = { name: name.value, description: desc.value, layers: p.layers.map((l) => ({
-      name: l.name, layer: l.layer, items: l.items.map(({ _data, ...rest }) => rest) })) };
+      name: l.name, layer: l.layer, items: l.items.map(({ _read, _dataError, ...rest }) => rest) })) };
     try {
       const saved = id === "new" ? await api("POST", "/api/programs", body) : await api("PUT", `/api/programs/${id}`, body);
       toast("Program saved; devices pick it up at their next check-in");
@@ -727,39 +840,107 @@ async function viewPackages() {
 async function viewImages() {
   const box = h("div", {}, h("p", { class: "muted" }, "Loading releases…"));
   const enc = new TextEncoder();
+  let defaults = {}, saved = [];
+  try {
+    const [d, w] = await Promise.all([api("GET", "/api/stick-defaults"), api("GET", "/api/wifi")]);
+    defaults = d.defaults || {};
+    saved = w.networks;
+  } catch (e) { toast(e.message); }
   const name = h("input", { placeholder: "blank = signage-<MAC>" });
   const tz = h("select", {}, TIMEZONES.map((z) => h("option", { value: z }, z)));
-  tz.value = "America/New_York";
-  const mode = h("input", { placeholder: "monitor default, e.g. 1920x1080@60" });
+  tz.value = defaults.device?.timezone || "America/New_York";
+  const mode = h("input", { placeholder: "monitor default, e.g. 1920x1080@60", value: defaults.display?.mode || "" });
   const rot = h("select", {}, [0, 90, 180, 270].map((r) => h("option", { value: r }, `${r}°`)));
-  const ntp = h("input", { placeholder: "optional, comma separated" });
-  const countdown = h("input", { type: "number", min: 0, max: 600, value: 15 });
-  const mok = h("input", { value: "signage", title: "Typed once into the blue MokManager screen on the first boot after install" });
-  const wifiRows = h("div");
-  const addWifi = () => {
-    const row = h("div", { class: "fields wifi" },
-      h("label", { class: "field" }, h("span", {}, "SSID"), h("input", { name: "ssid" })),
-      h("label", { class: "field" }, h("span", {}, "Password (blank = open)"), h("input", { name: "psk", type: "password" })),
-      h("label", { class: "field" }, h("span", {}, "Priority"), h("input", { name: "priority", type: "number", value: 0 })),
-      h("label", { class: "check" }, h("input", { name: "hidden", type: "checkbox" }), "Hidden"),
-      h("button", { class: "small ghost danger", type: "button", onclick: () => row.remove() }, "Remove"));
-    wifiRows.append(row);
+  rot.value = String(defaults.display?.rotation ?? 0);
+  const ntp = h("input", { placeholder: "optional, comma separated", value: (defaults.ntp?.servers || []).join(", ") });
+  const countdown = h("input", { type: "number", min: 0, max: 600, value: defaults.countdown ?? 15 });
+  const mok = h("input", { value: defaults.mok_password || "signage", title: "Typed once into the blue MokManager screen on the first boot after install" });
+  const dashUrl = h("input", { placeholder: info.dashboard_url, value: defaults.dashboard_url || "",
+    title: "Blank = this dashboard's address. Set it if you use a custom domain." });
+
+  // Saved WiFi networks: passwords stay on the server and are only written into the stick's config.toml.
+  const chosen = new Set(defaults.wifi || []);
+  const wifiBox = h("div");
+  const wifiMsg = h("div");
+  const netForm = (net) => {
+    const ssid = h("input", { name: "ssid", value: net?.ssid || "" });
+    const psk = h("input", { name: "psk", type: "password", autocomplete: "new-password",
+      placeholder: net ? (net.has_psk ? "unchanged" : "open network") : "blank = open network" });
+    const open = h("input", { type: "checkbox" });
+    const prio = h("input", { name: "priority", type: "number", value: net?.priority ?? 0 });
+    const hidden = h("input", { type: "checkbox", checked: net?.hidden });
+    const msg = h("div");
+    const form = h("div", { class: "panel inset" },
+      h("div", { class: "fields" },
+        h("label", { class: "field" }, h("span", {}, "SSID"), ssid),
+        h("label", { class: "field" }, h("span", {}, net ? "New password (blank keeps it)" : "Password (blank = open)"), psk),
+        h("label", { class: "field" }, h("span", {}, "Priority (higher is tried first)"), prio)),
+      h("div", { class: "row" },
+        h("label", { class: "check" }, hidden, "Hidden network"),
+        net?.has_psk ? h("label", { class: "check" }, open, "Remove the password (open network)") : "",
+        h("button", { type: "button", class: "small primary", onclick: async () => {
+          const body = { ssid: ssid.value, priority: Number(prio.value || 0), hidden: hidden.checked };
+          if (psk.value) body.psk = psk.value;
+          else if (!net || open.checked) body.psk = "";
+          try {
+            const r = net ? await api("PUT", `/api/wifi/${net.id}`, body) : await api("POST", "/api/wifi", body);
+            saved = saved.filter((x) => x.id !== r.id).concat(r).sort((x, y) => y.priority - x.priority || x.ssid.localeCompare(y.ssid));
+            chosen.add(r.id);
+            drawWifi();
+          } catch (e) { msg.replaceChildren(h("div", { class: "bad" }, e.message), errorList(e)); }
+        } }, net ? "Save changes" : "Save network"),
+        h("button", { type: "button", class: "small ghost", onclick: drawWifi }, "Cancel")), msg);
+    return form;
+  };
+  const drawWifi = () => {
+    wifiMsg.replaceChildren();
+    wifiBox.replaceChildren(
+      saved.length ? h("div", { class: "table-wrap" }, h("table", {}, h("tbody", {}, saved.map((n) => {
+        const cb = h("input", { type: "checkbox", checked: chosen.has(n.id), onchange: () => cb.checked ? chosen.add(n.id) : chosen.delete(n.id) });
+        const row = h("tr", {},
+          h("td", {}, h("label", { class: "check" }, cb, h("span", { class: "mono" }, n.ssid))),
+          h("td", { class: "muted small" }, n.has_psk ? "password saved" : "open", n.hidden ? " · hidden" : "", ` · priority ${n.priority}`),
+          h("td", { style: "text-align:right; white-space:nowrap" },
+            h("button", { type: "button", class: "small ghost", onclick: () => row.replaceWith(h("tr", {}, h("td", { colspan: 3 }, netForm(n)))) }, "Edit"),
+            h("button", { type: "button", class: "small ghost danger", onclick: async () => {
+              if (!confirm(`Delete the saved network "${n.ssid}"? Players already set up with it keep it.`)) return;
+              try {
+                await api("DELETE", `/api/wifi/${n.id}`);
+                saved = saved.filter((x) => x.id !== n.id);
+                chosen.delete(n.id);
+                drawWifi();
+              } catch (e) { toast(e.message); }
+            } }, "Delete")));
+        return row;
+      })))) : h("p", { class: "muted small" }, "No saved networks. Players use Ethernet only."),
+      h("button", { type: "button", class: "small", onclick: (e) => e.target.replaceWith(netForm(null)) }, "Add WiFi network"));
+  };
+  drawWifi();
+  const savedNote = h("span", { class: "muted small" }, defaults.updated ? `Defaults saved ${new Date(defaults.updated * 1000).toLocaleString()}` : "");
+
+  const stickBody = () => ({
+    device: { timezone: tz.value, ...(name.value.trim() ? { name: name.value.trim() } : {}) },
+    ntp: { servers: ntp.value.split(/[\s,]+/).filter(Boolean) },
+    display: { rotation: Number(rot.value), ...(mode.value.trim() ? { mode: mode.value.trim() } : {}) },
+    countdown: Number(countdown.value || 0),
+    mok_password: mok.value || "signage",
+    dashboard_url: dashUrl.value.trim(),
+  });
+  const wifiIds = () => saved.filter((n) => chosen.has(n.id)).map((n) => n.id);
+  const saveDefaults = async () => {
+    err.replaceChildren();
+    try {
+      const r = await api("PUT", "/api/stick-defaults", { ...stickBody(), wifi: wifiIds() });
+      savedNote.textContent = `Defaults saved ${new Date(r.defaults.updated * 1000).toLocaleString()}`;
+      toast("Saved as defaults");
+    } catch (e) { err.replaceChildren(h("div", { class: "bad" }, e.message), errorList(e)); }
   };
   const err = h("div");
   const progress = h("div", { class: "progress", hidden: true }, h("div"));
   const progressText = h("div", { class: "muted small" });
 
   const config = async () => {
-    const body = {
-      device: { timezone: tz.value, ...(name.value.trim() ? { name: name.value.trim() } : {}) },
-      network: { wifi: [...wifiRows.querySelectorAll(".wifi")].map((r) => ({
-        ssid: r.querySelector("[name=ssid]").value, psk: r.querySelector("[name=psk]").value,
-        priority: Number(r.querySelector("[name=priority]").value || 0), hidden: r.querySelector("[name=hidden]").checked })) },
-      ntp: { servers: ntp.value.split(/[\s,]+/).filter(Boolean) },
-      display: { rotation: Number(rot.value), ...(mode.value.trim() ? { mode: mode.value.trim() } : {}) },
-      countdown: Number(countdown.value || 0),
-      mok_password: mok.value || "signage",
-    };
+    const body = { ...stickBody(), network: { wifi: wifiIds().map((id) => ({ saved: id })) } };
     return (await api("POST", "/api/stick-config", body)).config;
   };
 
@@ -863,11 +1044,15 @@ async function viewImages() {
           h("label", { class: "field" }, h("span", {}, "Rotation"), rot),
           h("label", { class: "field" }, h("span", {}, "NTP servers"), ntp),
           h("label", { class: "field" }, h("span", {}, "Install countdown (seconds)"), countdown),
-          h("label", { class: "field" }, h("span", {}, "Secure Boot enrollment password"), mok)),
-        h("h3", {}, "WiFi (Ethernet with DHCP is always tried first)"), wifiRows,
-        h("button", { type: "button", class: "small", onclick: addWifi }, "Add WiFi network"),
-        h("p", { class: "muted small" }, "The dashboard address and enroll token are filled in for you."),
-        h("button", { type: "button", onclick: downloadConfig }, "Download config.toml only")),
+          h("label", { class: "field" }, h("span", {}, "Secure Boot enrollment password"), mok),
+          h("label", { class: "field" }, h("span", {}, "Dashboard address"), dashUrl)),
+        h("h3", {}, "WiFi (Ethernet with DHCP is always tried first)"),
+        h("p", { class: "muted small" }, "Ticked networks go on the stick. Saved passwords stay on the dashboard and are never shown again."),
+        wifiBox, wifiMsg,
+        h("p", { class: "muted small" }, info.enroll_token_set ? "The enroll token is filled in from the dashboard's deployment." : "No enroll token is set; redeploy with EnrollToken so players can enroll."),
+        h("div", { class: "row" },
+          h("button", { type: "button", onclick: saveDefaults }, "Save as defaults"),
+          h("button", { type: "button", onclick: downloadConfig }, "Download config.toml only"), savedNote)),
       h("div", { class: "panel" }, h("h2", {}, "2. Pick a release"), box, err, progress, progressText)));
   loadReleases();
 }

@@ -92,6 +92,17 @@ Either:
   gzip copies of everything before and after the config partition; the
   browser compresses only the new config partition and joins the three
   pieces, which is a valid multi-member gzip file.)
+  Stick settings are remembered: *Save as defaults* keeps the time zone,
+  display, NTP, install options, dashboard address (set it if you use a
+  custom domain) and which WiFi networks are ticked, so the next stick only
+  needs a release picked. WiFi networks are saved once and ticked per stick.
+  A saved network's password stays on the dashboard: it is written into a
+  stick's `config.toml` or a device's settings, but the browser is never sent
+  it back, and editing a network with the password left blank keeps it. The
+  device page can also *Add a saved network*. Devices keep a copy of the
+  network as it was when you saved their settings, so changing a saved
+  network later doesn't change players already set up with it. The enroll
+  token always comes from the deployment.
 - **By hand**: flash a release image, open the `SIGNCFG` drive on any
   computer, and set in `config.toml`:
 
@@ -137,6 +148,15 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   days of the week, a time of day window, and a date range. *Graphic data* is
   passed to the OGraf graphic; *Fill defaults from schema* uses the defaults
   in the graphic's manifest.
+- **Graphic parameters**: the Programs page shows each graphic's parameters
+  as a form built from its manifest schema (*Edit as JSON* is still there).
+  A parameter marked in the schema with
+  `"x-signage-options": {"source": "schedule", "list": "locations" | "tracks", "baseParam": "apiBase"}`
+  gets a searchable multi-select filled from that schedule server (fetched
+  through the dashboard, so CORS doesn't matter), which also takes free
+  text. `"format": "color"` gets a colour picker. On a device page,
+  *Graphic parameters* sets values for that device only, such as its room;
+  they replace the program's values in every item of that graphic.
 - **Packages**: upload an OGraf graphic as a zip (its `*.ograf.json` manifest
   plus files). Versions are immutable. Programs use the package's *active*
   version unless an item pins one, so *Make active* rolls a version out to
@@ -233,5 +253,8 @@ shows nothing.
 - Device tokens are random per device and stored hashed. Removing a device
   invalidates its token; it re-enrolls with the enroll token if it is still
   running.
+- Saved WiFi passwords are kept in DynamoDB (encrypted at rest by AWS) and
+  are only ever sent out inside a generated config.toml or a device's
+  settings, never back to the dashboard's lists.
 - Screenshots, packages and images are in a private bucket and reached
   through short-lived presigned URLs.
