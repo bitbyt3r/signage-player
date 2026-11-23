@@ -1,7 +1,7 @@
 # MAGFest schedule (OGraf graphic)
 
 A full-screen schedule from [MAGSched](https://schedule.magfest.net)
-(`/sessions`, `/locations`, `/tracks`).
+(`/sessions`, `/locations`, `/tracks`), styled for Super MAGFest 2027.
 
 - **Rooms set:** the session on now in each room, with a progress bar and
   time left, what's up next (with a countdown), and a "Later" list of what
@@ -13,6 +13,33 @@ A full-screen schedule from [MAGSched](https://schedule.magfest.net)
   in one or two columns depending on the screen, paging when it doesn't fit.
 
 It fits any resolution and switches to a stacked layout on portrait screens.
+
+## Super MAGFest 2027 theme (default)
+
+Built from the theme team's Asset Pack 01 and style guide. The art in
+`assets/` is used as is, only cropped and scaled:
+
+| File | From the pack |
+|---|---|
+| `background-crest-fabric.png` | Backgrounds & Wallpapers/Background-Crest-Fabric.png |
+| `logo-flat.png` | Logos/FLAT LOGO/DEFAULT-Logo-Flat-Red-WhiteText-Border-NoShadow.png (the style guide's default) |
+| `heading-box-long.png` | Background_WWMenu-Heading_Box_Long.png (room name tags) |
+| `context-box.png` | Background_WWMenu-Context_Box.png (the clock) |
+| `squarewave-brown-tile.png`, `squarewave-triangle.png` | SquarewavePattern-Brown-Single / Triangle-Single (divider) |
+| `heart-full.png`, `heart-half.png` | HUD-Hearts.png: the time left in the current session, as ten hearts |
+| `trihard.png` | Icon-Trihard-Render-Glow-Shadow-NoBackground.png (sessions on now) |
+| `pixel-tomi.png` | Character Illustrations/Pixel-Tomi.png (next to "Now") |
+| `loot-presenting.png` | 3D Character Renders/Loot-Presenting.png (beside the clock) |
+| `hyut-run.png` | 3D Character Renders/Hyut-Run.png (runs along the bottom on page changes) |
+| `HyliaSerifBeta-Regular.otf`, `NotoSans-Variable.ttf` | Fonts/ (headings and body, as the style guide says) |
+
+Colours are the style guide's theme colours (gold #E4BC60, greens #2F9445 and
+#0E5135, brown #301E12). The guide's sub-heading font, Chiaro, isn't in the
+pack, so sub-headings use Hylia Serif. Animations: the logo pops in, the
+divider draws out, the cards rise in order and Loot hops up beside the
+clock; Tomi floats, the last full heart beats, the Trihards glint, and Hyut
+runs across the bottom whenever the page changes. `"theme": "plain"` gives
+the dark version without the art.
 
 ## Settings (the dashboard's *Graphic data*)
 
@@ -38,7 +65,8 @@ It fits any resolution and switches to a stacked layout on portrait screens.
 | `showDescription` | `true` | Description on the single-room card. |
 | `clock24` | `false` | 24-hour times. |
 | `timeZone` | `""` | IANA zone; empty uses the player's. |
-| `accent`, `background` | `#e4405f`, `#0e1218` | Colours. A transparent background shows the layers behind. |
+| `theme` | `super2027` | `super2027` or `plain`. |
+| `accent`, `background` | `""` | Override the theme's colours. With `plain`, a transparent background shows the layers behind. |
 | `apiBase` | `https://schedule.magfest.net` | Schedule server. |
 | `refreshSeconds` | `120` | How often to fetch (at least 30). |
 
@@ -57,7 +85,7 @@ share one copy and one fetch.
 ## OGraf
 
 Real-time only, one step. `playAction` fades the frame in and slides the
-header and cards up (about 1.3 s); `stopAction` fades them out (about
+header and cards up (about 1.4 s); `stopAction` fades them out (about
 0.7 s), so a layer can animate one graphic out and the next in.
 `updateAction` takes new settings and cross-fades. Inside the graphic,
 changes (a session ending, the next page) cross-fade the part that changed.

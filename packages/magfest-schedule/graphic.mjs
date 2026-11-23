@@ -23,8 +23,9 @@ const DEFAULTS = {
     showDescription: true,
     clock24: false,
     timeZone: "",
-    accent: "#e4405f",
-    background: "#0e1218",
+    theme: "super2027",
+    accent: "",
+    background: "",
     apiBase: DEFAULT_API,
     refreshSeconds: 120,
 };
@@ -33,6 +34,29 @@ const DEFAULTS = {
 const HIDDEN_CHIPS = /^(noise level|all ages|schedule track|alcohol|animated blood|blood and gore|mature|nudity|sexual|violence)/i;
 const ROOMS_PER_PAGE = 4;
 const EASE = "cubic-bezier(.2,.8,.2,1)";
+const HEARTS = 10;
+
+// Super MAGFest 2027 theme: art from the theme team's asset pack, only
+// cropped and scaled (see assets/). Colours from the style guide.
+const asset = (f) => new URL(`./assets/${f}`, import.meta.url).href;
+const THEMES = {
+    super2027: { accent: "#E4BC60", background: "#0E5135" },
+    plain: { accent: "#e4405f", background: "#0e1218" },
+};
+
+// Fonts from the asset pack. @font-face doesn't reach into shadow roots, so
+// register them on the document once.
+let fontsLoaded = null;
+function loadFonts() {
+    if (fontsLoaded) return fontsLoaded;
+    const faces = [
+        new FontFace("S27 Hylia", `url("${asset("HyliaSerifBeta-Regular.otf")}")`),
+        new FontFace("S27 Noto", `url("${asset("NotoSans-Variable.ttf")}")`, { weight: "100 900", stretch: "62.5% 100%" }),
+    ];
+    fontsLoaded = Promise.all(faces.map((f) => { document.fonts.add(f); return f.load(); }))
+        .catch((e) => console.warn("[magsched] font failed to load", e));
+    return Promise.race([fontsLoaded, new Promise((r) => setTimeout(r, 3000))]);
+}
 
 const STYLE = `
 :host { position: absolute; inset: 0; pointer-events: none; container-type: size;
@@ -124,6 +148,80 @@ const STYLE = `
                grid-template-rows: repeat(var(--rows, 8), var(--row-h)); align-content: start; }
 .sched .row { height: var(--row-h); }
 
+/* ---- Super MAGFest 2027 theme */
+.s27 { display: none; }
+.t-super2027 { --fg: #f7eedb; --muted: #d6c19a; --line: rgba(228,188,96,.30); --panel: rgba(48,30,18,.86);
+               --gold: #E4BC60; --green: #2F9445; --brown: #301E12;
+               background: var(--img-bg) center / cover no-repeat, var(--bg);
+               font-family: "S27 Noto", "Noto Sans", "DejaVu Sans", sans-serif; padding: 3.4cqmin 4.4cqmin 4.2cqmin; }
+.t-super2027 .s27 { display: block; }
+.t-super2027 .bar { border-bottom: none; padding-bottom: 0; align-items: center; gap: 2.6cqmin; position: relative; }
+.t-super2027 .logo { height: 11cqmin; width: auto; flex: none; filter: drop-shadow(0 .4cqmin .6cqmin rgba(0,0,0,.6)); }
+.t-super2027 .title { font-family: "S27 Hylia", serif; font-weight: 400; font-size: 6.4cqmin; color: var(--gold);
+                      text-shadow: .25cqmin .35cqmin 0 var(--brown), 0 0 1.6cqmin rgba(0,0,0,.7); }
+.t-super2027 .subtitle { color: var(--fg); font-size: 2.3cqmin; text-shadow: 0 .2cqmin .5cqmin #000; }
+.t-super2027 .meta { display: flex; flex-direction: column; align-items: flex-end; }
+.t-super2027 .clock { border-style: solid; border-color: transparent; border-width: 1.3cqmin 1.6cqmin;
+                      border-image: var(--img-context) 34 40 fill / 1.3cqmin 1.6cqmin stretch;
+                      color: var(--brown); font-size: 4.2cqmin; padding: .4cqmin 1.4cqmin; }
+.t-super2027 .status { text-shadow: 0 .2cqmin .4cqmin #000; }
+.t-super2027 .loot { position: absolute; right: calc(100% + 1cqmin); top: -1.5cqmin; height: 15cqmin; width: auto;
+                     filter: drop-shadow(0 .5cqmin .8cqmin rgba(0,0,0,.5)); transform-origin: 50% 100%;
+                     animation: bob 3.2s ease-in-out infinite; }
+.t-super2027 .meta-wrap { position: relative; }
+.t-super2027 .divider { height: 3.2cqmin; flex: none;
+    background: var(--img-tri) center / auto 100% no-repeat, var(--img-wave) center / auto 100% repeat-x; }
+@keyframes bob { 50% { transform: translateY(-.8cqmin) rotate(-2deg); } }
+@keyframes float { 0%,100% { transform: translate(0, 0); } 30% { transform: translate(.4cqmin, -.9cqmin); } 65% { transform: translate(-.3cqmin, -.3cqmin); } }
+@keyframes glint { 50% { filter: drop-shadow(0 0 .9cqmin rgba(255,226,140,.95)) brightness(1.25); } }
+.t-super2027 .card, .t-super2027 .side { background: var(--panel); border: .3cqmin solid var(--gold); border-radius: .6cqmin;
+    box-shadow: inset 0 0 0 .5cqmin rgba(48,30,18,.9), inset 0 0 0 .65cqmin rgba(228,188,96,.45), 0 .8cqmin 2cqmin rgba(0,0,0,.45); }
+.t-super2027 .side h2, .t-super2027 .label { font-family: "S27 Hylia", serif; font-weight: 400; letter-spacing: .06em;
+    font-size: 2.9cqmin; color: var(--gold); }
+.t-super2027 .label .dot { display: none; }
+.t-super2027 .label .tomi { display: inline-block; height: 4cqmin; width: auto; image-rendering: pixelated; vertical-align: -1cqmin;
+                            margin-right: 1cqmin; animation: float 2.6s ease-in-out infinite; }
+.t-super2027 .label .when { font-family: "S27 Noto", sans-serif; font-size: 2.3cqmin; color: var(--fg); }
+.t-super2027 .now-name { font-weight: 800; font-stretch: 87.5%; text-shadow: 0 .3cqmin .5cqmin rgba(0,0,0,.6); }
+.t-super2027 .next-name, .t-super2027 .row .n { font-stretch: 87.5%; }
+.t-super2027 .chip { border-color: rgba(228,188,96,.55); color: var(--gold); }
+.t-super2027 .track { background: rgba(0,0,0,.55); border: .2cqmin solid #f7eedb; height: 1.6cqmin; }
+.t-super2027 .fill { background: linear-gradient(#5fd36f, var(--green)); }
+.t-super2027 .card.compact .track { height: 1.1cqmin; border-width: .15cqmin; }
+.t-super2027 .row .track { height: .7cqmin; border: none; background: rgba(0,0,0,.45); }
+.t-super2027 .sched .list { background: var(--panel); border: .3cqmin solid var(--gold); border-radius: .6cqmin; padding: 0 2.2cqmin;
+    box-shadow: inset 0 0 0 .5cqmin rgba(48,30,18,.9), inset 0 0 0 .65cqmin rgba(228,188,96,.45), 0 .8cqmin 2cqmin rgba(0,0,0,.45); }
+.t-super2027 .hearts { display: flex; gap: .7cqmin; margin-top: 2cqmin; }
+.t-super2027 .hearts img { height: 4.2cqmin; width: auto; transition: opacity .6s, filter .6s;
+                           filter: drop-shadow(0 .3cqmin .3cqmin rgba(0,0,0,.6)); }
+.t-super2027 .hearts img.spent { opacity: .38; filter: grayscale(1) brightness(.75); }
+.t-super2027 .hearts img.beat { animation: beat 1.1s ease-in-out infinite; }
+@keyframes beat { 0%,100% { transform: scale(1); } 15% { transform: scale(1.14); } 30% { transform: scale(1); } 45% { transform: scale(1.08); } }
+.t-super2027 .hero .progress { padding-top: 1.2cqmin; }
+.t-super2027 .hero .progress .track { display: none; }
+.t-super2027 .room, .t-super2027 .card.compact .room {
+    font-family: "S27 Hylia", serif; font-weight: 400; color: var(--brown);
+    border-style: solid; border-color: transparent; border-width: .9cqmin 2.2cqmin;
+    border-image: var(--img-heading) 30 60 fill / .9cqmin 2.2cqmin stretch; padding: .1cqmin .6cqmin; align-self: flex-start; }
+.t-super2027 .room small { color: rgba(48,30,18,.75); }
+.t-super2027 .row .t.live { color: var(--gold); display: flex; align-items: center; gap: .6cqmin; letter-spacing: .06em;
+                            font-family: "S27 Hylia", serif; font-weight: 400; font-size: 2.8cqmin; }
+.t-super2027 .row .t.live img { height: 2.8cqmin; width: auto; animation: glint 2.4s ease-in-out infinite; }
+.t-super2027 .row .t { color: var(--gold); }
+.t-super2027 .pager i.on { background: var(--gold); }
+.t-super2027 .hyut { position: absolute; left: 0; bottom: .2cqmin; height: 9cqmin; width: auto; z-index: 3;
+                     transform: translateX(-30cqw); filter: drop-shadow(0 .4cqmin .4cqmin rgba(0,0,0,.5)); }
+.t-super2027 .idle { color: var(--muted); font-family: "S27 Hylia", serif; font-weight: 400; }
+.t-super2027 .empty { color: var(--fg); font-family: "S27 Hylia", serif; text-shadow: 0 .3cqmin .6cqmin #000; }
+
+.t-super2027 .card.compact { padding: 1.2cqmin 2cqmin; }
+.t-super2027 .card.compact .room { font-size: 2.3cqmin; border-width: .6cqmin 1.6cqmin; border-image-width: .6cqmin 1.6cqmin; }
+.t-super2027 .card.compact .progress { padding-top: .6cqmin; }
+.t-super2027 .card.compact .next { padding-top: .6cqmin; }
+@container (aspect-ratio < 1) {
+    .t-super2027 .loot { display: none; }
+    .t-super2027 .logo { height: 8cqmin; }
+}
 /* portrait */
 @container (aspect-ratio < 1) {
     .rooms-mode { grid-template-columns: 1fr; grid-template-rows: 1.5fr 1fr; }
@@ -179,8 +277,11 @@ export default class MagfestSchedule extends HTMLElement {
         d.pageSeconds = Math.max(3, d.pageSeconds || DEFAULTS.pageSeconds);
         const resubscribe = !this.store || d.apiBase !== this.data.apiBase || d.refreshSeconds !== this.data.refreshSeconds;
         this.data = d;
-        this.style.setProperty("--accent", d.accent || DEFAULTS.accent);
-        this.style.setProperty("--bg", d.background || DEFAULTS.background);
+        if (!THEMES[d.theme]) d.theme = DEFAULTS.theme;
+        const th = THEMES[d.theme];
+        this.style.setProperty("--accent", d.accent || th.accent);
+        this.style.setProperty("--bg", d.background || th.background);
+        if (this.els?.frame) this.els.frame.className = `frame t-${d.theme}`;
         try {
             this.fmtTime = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", hour12: !d.clock24, timeZone: d.timeZone || undefined });
             this.fmtDay = new Intl.DateTimeFormat(undefined, { weekday: "short", timeZone: d.timeZone || undefined });
@@ -282,10 +383,12 @@ export default class MagfestSchedule extends HTMLElement {
         return h("div", { class: "card hero" },
             this.data.rooms.length > 1 || m.rooms.length > 1 ? h("div", { class: "room" }, r.short, full && h("small", {}, full)) : null,
             c ? [
-                h("div", { class: "label" }, h("span", { class: "dot" }), "Now"),
+                h("div", { class: "label" }, h("span", { class: "dot" }), h("img", { class: "tomi s27", src: asset("pixel-tomi.png"), alt: "" }), "Now"),
                 h("div", { class: "now-name" }, c.name),
                 h("div", { class: "chips" }, this.chips(c, m)),
                 this.data.showDescription && c.desc ? h("div", { class: "desc" }, c.desc) : null,
+                h("div", { class: "hearts s27", "data-hearts-start": c.start, "data-hearts-end": c.end },
+                    Array.from({ length: HEARTS }, () => h("img", { src: asset("heart-full.png"), alt: "" }))),
                 this.progress(c, now, false),
             ] : h("div", { class: "idle" }, n ? "Nothing on right now" : "No more sessions scheduled"),
             n ? h("div", { class: "next" },
@@ -307,7 +410,7 @@ export default class MagfestSchedule extends HTMLElement {
     row(s, now, m, withRoom) {
         const live = s.start <= now;
         return h("div", { class: "row" },
-            live ? h("div", { class: "t live" }, "NOW") : h("div", { class: "t" },
+            live ? h("div", { class: "t live" }, h("img", { class: "s27", src: asset("trihard.png"), alt: "" }), "NOW") : h("div", { class: "t" },
                 this.dayKey(s.start) === this.dayKey(now) ? this.time(s.start) : [this.time(s.start), h("small", {}, this.fmtDay.format(s.start))]),
             h("div", {},
                 h("div", { class: "n" }, this.name(s)),
@@ -393,6 +496,7 @@ export default class MagfestSchedule extends HTMLElement {
         if (now - this.pageAt >= this.data.pageSeconds * 1000) {
             this.page = (this.page + 1) % pages;
             this.pageAt = now;
+            this.runHyut();
             return true;
         }
         if (this.page >= pages) this.page = 0;
@@ -442,7 +546,7 @@ export default class MagfestSchedule extends HTMLElement {
         const unit = Math.min(host.width, host.height) / 100 || 8;
         const rowH = Math.max(24, unit * 8.2);
         const cols = box.width / unit > 150 ? 2 : 1;
-        const rows = Math.max(1, Math.floor((box.height + 0.5) / rowH));
+        const rows = Math.max(1, Math.floor((list.clientHeight + 0.5) / rowH));
         list.style.setProperty("--row-h", `${rowH}px`);
         list.style.setProperty("--cols", cols);
         list.style.setProperty("--rows", rows);
@@ -472,6 +576,18 @@ export default class MagfestSchedule extends HTMLElement {
             const s = Number(f.dataset.start), e = Number(f.dataset.end);
             f.style.width = `${Math.min(100, Math.max(0, ((now - s) / (e - s)) * 100)).toFixed(2)}%`;
         }
+        // Hearts: the time left, Zelda style (ten hearts at the start, half-hearts as it runs down).
+        for (const box of root.querySelectorAll("[data-hearts-start]")) {
+            const s = Number(box.dataset.heartsStart), e = Number(box.dataset.heartsEnd);
+            const v = Math.max(0, Math.ceil(((e - now) / (e - s)) * HEARTS * 2)) / 2;
+            [...box.children].forEach((img, i) => {
+                const kind = i < Math.floor(v) ? "full" : i < v ? "half" : "empty";
+                const src = asset(kind === "half" ? "heart-half.png" : "heart-full.png");
+                if (img.getAttribute("src") !== src) img.setAttribute("src", src);
+                img.classList.toggle("spent", kind === "empty");
+                img.classList.toggle("beat", kind !== "empty" && i === Math.ceil(v) - 1);
+            });
+        }
         for (const el of root.querySelectorAll("[data-left]")) el.textContent = this.left({ end: Number(el.dataset.left) }, now);
         for (const el of root.querySelectorAll("[data-until]")) el.textContent = this.until({ start: Number(el.dataset.until) }, now);
     }
@@ -494,13 +610,20 @@ export default class MagfestSchedule extends HTMLElement {
         }
         const root = this.attachShadow({ mode: "open" });
         root.innerHTML = `<style>${STYLE}</style>
-            <div class="frame"><header class="bar"><div style="min-width:0"><div class="title"></div><div class="subtitle"></div></div>
-            <div class="meta"><div class="clock"></div><div class="status"></div></div></header><main class="body"></main></div>`;
+            <div class="frame"><header class="bar"><img class="logo s27" alt="">
+            <div style="min-width:0;flex:1"><div class="title"></div><div class="subtitle"></div></div>
+            <div class="meta-wrap"><img class="loot s27" alt=""><div class="meta"><div class="clock"></div><div class="status"></div></div></div></header>
+            <div class="divider s27"></div><main class="body"></main><img class="hyut s27" alt=""></div>`;
+        root.querySelector(".logo").src = asset("logo-flat.png");
+        root.querySelector(".loot").src = asset("loot-presenting.png");
+        root.querySelector(".hyut").src = asset("hyut-run.png");
+        for (const [k, f] of [["--img-bg", "background-crest-fabric.png"], ["--img-context", "context-box.png"], ["--img-heading", "heading-box-long.png"],
+            ["--img-wave", "squarewave-brown-tile.png"], ["--img-tri", "squarewave-triangle.png"]]) this.style.setProperty(k, `url("${asset(f)}")`);
         const q = (s) => root.querySelector(s);
-        this.els = { frame: q(".frame"), bar: q(".bar"), title: q(".title"), subtitle: q(".subtitle"), clock: q(".clock"), status: q(".status"), body: q(".body"), regions: {} };
+        this.els = { frame: q(".frame"), bar: q(".bar"), logo: q(".logo"), loot: q(".loot"), hyut: q(".hyut"), divider: q(".divider"), title: q(".title"), subtitle: q(".subtitle"), clock: q(".clock"), status: q(".status"), body: q(".body"), regions: {} };
         this.setData(data);
         // Show cached data at once; with no cache, give the network a moment.
-        await this.store.ready(5000);
+        await Promise.all([this.store.ready(5000), loadFonts(), this.decodeImages()]);
         await document.fonts?.ready;
         this.render(true);
         this.updateLive(Date.now());
@@ -508,6 +631,29 @@ export default class MagfestSchedule extends HTMLElement {
         this.onResize = new ResizeObserver(() => { if (this.mode === "schedule") { this.key = ""; this.render(false); } });
         this.onResize.observe(this);
         return { statusCode: 200 };
+    }
+
+    // Wait for the art so nothing pops in mid-animation.
+    decodeImages() {
+        const imgs = [this.els.logo, this.els.loot, this.els.hyut];
+        const bgs = ["background-crest-fabric.png", "heading-box-long.png", "context-box.png", "heart-full.png", "heart-half.png", "pixel-tomi.png", "trihard.png"]
+            .map((f) => Object.assign(new Image(), { src: asset(f) }));
+        const all = [...imgs, ...bgs].map((i) => i.decode().catch(() => {}));
+        return Promise.race([Promise.all(all), new Promise((r) => setTimeout(r, 4000))]);
+    }
+
+    get themed() { return this.data.theme === "super2027"; }
+
+    // Hyut runs along the bottom edge (on page flips and when the graphic comes in).
+    runHyut() {
+        const el = this.els?.hyut;
+        if (!el || !this.themed || !this.visible || this.hyutRunning) return;
+        this.hyutRunning = true;
+        const a = el.animate([
+            { transform: "translateX(-30cqw) translateY(0)" }, { transform: "translateX(10cqw) translateY(-1.2cqmin)", offset: .25 },
+            { transform: "translateX(50cqw) translateY(0)", offset: .5 }, { transform: "translateX(90cqw) translateY(-1.2cqmin)", offset: .75 },
+            { transform: "translateX(130cqw) translateY(0)" }], { duration: 2600, easing: "linear" });
+        a.finished.catch(() => {}).finally(() => { this.hyutRunning = false; });
     }
 
     async dispose() {
@@ -539,12 +685,17 @@ export default class MagfestSchedule extends HTMLElement {
                 f.style.visibility = "visible";
                 this.visible = true;
                 const parts = this.pieces();
+                const t = this.themed, E = this.els;
                 await Promise.all([
                     this.anim(f, [{ opacity: 0 }, { opacity: 1 }], 400, skip),
-                    this.anim(this.els.bar, [{ transform: "translateY(-120%)", opacity: 0 }, { transform: "none", opacity: 1 }], 600, skip, 150),
+                    this.anim(E.bar, [{ transform: "translateY(-120%)", opacity: 0 }, { transform: "none", opacity: 1 }], 600, skip, 150),
+                    t && this.anim(E.logo, [{ transform: "scale(.4) rotate(-8deg)", opacity: 0 }, { transform: "scale(1.08)", opacity: 1, offset: .7 }, { transform: "none", opacity: 1 }], 700, skip, 300),
+                    t && this.anim(E.divider, [{ transform: "scaleX(0)", opacity: 0 }, { transform: "none", opacity: 1 }], 600, skip, 350),
+                    t && this.anim(E.loot, [{ transform: "translateY(40%) scale(.6)", opacity: 0 }, { transform: "translateY(-6%) scale(1.04)", opacity: 1, offset: .7 }, { transform: "none", opacity: 1 }], 650, skip, 650),
                     ...parts.map((p, i) => this.anim(p, [{ transform: "translateY(4cqmin)", opacity: 0 }, { transform: "none", opacity: 1 }], 550, skip, 250 + Math.min(i, 12) * 45)),
                 ]);
-                for (const a of [f, this.els.bar, ...parts]) for (const x of a.getAnimations()) if (x.playState === "finished") x.cancel();
+                for (const a of [f, E.bar, E.logo, E.divider, E.loot, ...parts]) for (const x of a.getAnimations()) if (x.playState === "finished" && x.effect?.getComputedTiming().fill === "both") x.cancel();
+                if (!skip) this.runHyut();
             }
             return { statusCode: 200, currentStep: 0 };
         });
@@ -558,10 +709,14 @@ export default class MagfestSchedule extends HTMLElement {
                 await Promise.all([
                     ...parts.map((p, i) => this.anim(p, [{ opacity: 1, transform: "none" }, { opacity: 0, transform: "translateY(-3cqmin)" }], 300, skip, Math.min(i, 12) * 25)),
                     this.anim(this.els.bar, [{ opacity: 1 }, { opacity: 0 }], 300, skip, 100),
+                    this.themed && this.anim(this.els.hyut, [{ opacity: 1 }, { opacity: 0 }], 200, skip),
+                    this.themed && this.anim(this.els.loot, [{ transform: "none", opacity: 1 }, { transform: "translateY(30%) scale(.7)", opacity: 0 }], 300, skip),
+                    this.themed && this.anim(this.els.divider, [{ transform: "none", opacity: 1 }, { transform: "scaleX(0)", opacity: 0 }], 300, skip, 80),
                 ]);
                 await this.anim(f, [{ opacity: 1 }, { opacity: 0 }], 250, skip);
                 f.style.visibility = "hidden";
-                for (const a of [f, this.els.bar, ...parts]) for (const x of a.getAnimations()) x.cancel();
+                for (const x of this.els.hyut.getAnimations()) x.cancel();
+                for (const a of [f, this.els.bar, this.els.loot, this.els.divider, ...parts]) for (const x of a.getAnimations()) if (x.effect?.getComputedTiming().fill === "both") x.cancel();
                 this.visible = false;
             }
             return { statusCode: 200 };

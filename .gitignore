@@ -8,3 +8,4 @@ mkosi.key
 mkosi.crt
 mkosi.signing/
 dist/
+packages/magfest-schedule/assets/

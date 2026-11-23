@@ -1,9 +1,9 @@
 {
   "$schema": "https://ograf.ebu.io/v1/specification/json-schemas/graphics/schema.json",
   "id": "magfest-schedule",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "MAGFest schedule",
-  "description": "Full-screen schedule from schedule.magfest.net. With rooms set: the current session in each room with a progress bar, up next, and a short list of what's later. With no rooms: the schedule by itself, paging through what's on now and coming up. Cached on the device, so it keeps working offline.",
+  "description": "Full-screen schedule in the Super MAGFest 2027 style from schedule.magfest.net. With rooms set: the current session in each room with a progress bar, up next, and a short list of what's later. With no rooms: the schedule by itself, paging through what's on now and coming up. Cached on the device, so it keeps working offline.",
   "author": {
     "name": "MAGFest signage"
   },
@@ -92,16 +92,27 @@
         "title": "Time zone",
         "description": "IANA time zone, e.g. America/New_York. Empty uses the player's time zone."
       },
+      "theme": {
+        "type": "string",
+        "enum": [
+          "super2027",
+          "plain"
+        ],
+        "default": "super2027",
+        "title": "Theme",
+        "description": "super2027: the Super MAGFest 2027 theme art (logo, crest background, hearts, Loot, Tomi and Hyut). plain: dark, no art."
+      },
       "accent": {
         "type": "string",
-        "default": "#e4405f",
-        "title": "Accent colour"
+        "default": "",
+        "title": "Accent colour",
+        "description": "Empty uses the theme's (gold for super2027)."
       },
       "background": {
         "type": "string",
-        "default": "#0e1218",
-        "title": "Background",
-        "description": "Any CSS colour; use a transparent one (rgba(...)) to show layers behind."
+        "default": "",
+        "title": "Background colour",
+        "description": "Behind the theme art; empty uses the theme's. For plain, a transparent colour (rgba(...)) shows the layers behind."
       },
       "apiBase": {
         "type": "string",
@@ -127,7 +138,7 @@
   "actionDurations": [
     {
       "type": "playAction",
-      "duration": 1300
+      "duration": 1400
     },
     {
       "type": "stopAction",
