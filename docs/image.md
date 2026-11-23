@@ -40,8 +40,8 @@ mode on `http://127.0.0.1:8080/player/`, the player page (served by
 nothing to play. See [player.md](player.md).
 
 **Demo graphic.** With `[player] demo = true` in `config.toml`, the player
-plays the demo lower third (`packages/demo-lower-third/`, baked into
-`/usr/share/signage/packages/`) instead of the status screen while no
+plays the demo lower third (`mkosi.extra/usr/share/signage/packages/demo-lower-third/`,
+installed at `/usr/share/signage/packages/`) instead of the status screen while no
 program is assigned. `/usr/share/signage/host/` is a minimal OGraf preview
 page: it loads the manifest named by `?graphic=` and loops play (hold 6 s),
 stop, pause 2 s, with the device status in a corner overlay.

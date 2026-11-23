@@ -1,4 +1,6 @@
 #!/bin/bash
+# packages/ is local-only and git-ignored: keep graphics there and upload
+# the zips by hand.
 # Zip each OGraf graphic in packages/ for upload on the dashboard's Packages
 # page: dist/ograf/<id>-<version>.zip, with the manifest at the zip's root.
 #   scripts/package-ograf.sh                 # every package
