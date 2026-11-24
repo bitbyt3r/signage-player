@@ -5,6 +5,7 @@
   /api/...                 admin API (Authorization: Bearer <token>)
   /device/enroll           device enrollment (shared enroll token)
   /device/checkin          device check-in (Authorization: Device <id>:<token>)
+  /gateway/checkin         Pearl gateway check-in (pearls.py)
 """
 
 import base64
@@ -119,7 +120,7 @@ class Req:
 def handler(event, context=None):
     req = Req(event)
     try:
-        if req.method == "GET" and not req.path.startswith(("/api/", "/device/")):
+        if req.method == "GET" and not req.path.startswith(("/api/", "/device/", "/gateway/")):
             return static(req.path)
         for method, rx, auth, fn in ROUTES:
             m = rx.match(req.path)
@@ -1374,3 +1375,7 @@ def param_options(req):
     body = {"options": opts, "source": base + path}
     _options_cache[key] = (time.time(), body)
     return resp(200, body)
+
+
+# Epiphan Pearls and their gateways. Imported last: it registers routes with route().
+import pearls  # noqa: E402,F401

@@ -1,0 +1,30 @@
+# Keeps pearl-gateway running on a Linux machine on the Pearls' network.
+#
+#   sudo install -m 755 pearl-gateway /usr/local/bin/pearl-gateway
+#   sudo install -m 644 pearl-gateway.service /etc/systemd/system/
+#   sudo install -m 600 /dev/stdin /etc/pearl-gateway.env <<'END'
+#   PEARL_GATEWAY_DASHBOARD=https://dash.example
+#   PEARL_GATEWAY_ID=1a2b3c4d5e6f
+#   PEARL_GATEWAY_TOKEN=pgw_...
+#   END
+#   sudo systemctl enable --now pearl-gateway
+#   journalctl -u pearl-gateway -f
+
+[Unit]
+Description=Pearl gateway for the signage dashboard
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+EnvironmentFile=/etc/pearl-gateway.env
+ExecStart=/usr/bin/python3 /usr/local/bin/pearl-gateway
+Restart=always
+RestartSec=5
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

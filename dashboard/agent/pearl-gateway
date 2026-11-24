@@ -1,0 +1,531 @@
+#!/usr/bin/env python3
+"""Pearl gateway: connects Epiphan Pearls on a local network to the signage
+dashboard, which can't reach them itself.
+
+It checks in with the dashboard every few seconds, gets the list of Pearls it
+looks after (with their passwords), reads each Pearl's state through the
+Pearl REST API and reports it, and runs the API calls queued for them in the
+dashboard ("ops"), sending back the results. It only talks to the Pearls the
+dashboard assigns to it, and only to /api/ and /admin/ paths on them.
+
+Standard library only; runs on a signage player, a Pi, a Mac, anything with
+Python 3.9+ on the Pearls' network.
+
+    PEARL_GATEWAY_TOKEN=pgw_... pearl-gateway --dashboard https://dash.example --id 1a2b3c4d5e6f
+
+Create the gateway (and get its ID and token) on the dashboard's Pearls page.
+"""
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import re
+import socket
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+
+VERSION = "2"
+API = "/api/v2.0"
+# Same rule as the dashboard's: only Pearl API paths, whatever we're sent.
+PATH_RE = re.compile(r"^/(api/v2\.[0-9]+|admin)/[A-Za-z0-9._~/-]*$")
+METHODS = {"GET", "PUT", "PATCH", "POST", "DELETE"}
+# Keep each check-in well under the dashboard's 6 MB request limit; snapshots
+# that don't fit go at the next check-in.
+CHECKIN_BUDGET = 3_000_000
+
+
+def log(*a):
+    print(time.strftime("%H:%M:%S"), *a, file=sys.stderr, flush=True)
+
+
+def local_ips():
+    ips = set()
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))   # no packets sent; picks the outbound interface
+            ips.add(s.getsockname()[0])
+    except OSError:
+        pass
+    return sorted(ips)
+
+
+class PearlError(Exception):
+    pass
+
+
+class Pearl:
+    """One Pearl's REST API."""
+
+    def __init__(self, conf):
+        self.update(conf)
+
+    def update(self, conf):
+        self.id = conf["id"]
+        self.name = conf.get("name") or conf["id"]
+        self.host = conf["host"]
+        self.auth = "Basic " + base64.b64encode(f"{conf.get('username') or 'admin'}:{conf.get('password') or ''}".encode()).decode()
+        self.snapshot_every = max(2, int(conf.get("snapshot_every") or 30))
+        if getattr(self, "_for", None) != self.host:
+            self._for, self._addr, self._resolved = self.host, None, 0
+
+    def addr(self):
+        """The host's IPv4 address, looked up once a minute. Names like
+        gsaa798666.local (DHCP) work; resolving them on every request can take
+        seconds (mDNS waits for an IPv6 answer that never comes)."""
+        host, _, port = self.host.partition(":")
+        if not self._addr or time.time() - self._resolved > 60:
+            try:
+                ip = socket.getaddrinfo(host, int(port or 80), socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+                self._addr, self._resolved = ip + (f":{port}" if port else ""), time.time()
+            except OSError as e:
+                if not self._addr:
+                    raise PearlError(f"can't find {host}: {e}")
+        return self._addr
+
+    def request(self, method, path, query=None, body=None, timeout=10, raw=False):
+        url = f"http://{self.addr()}{path}"
+        if query:
+            url += "?" + urllib.parse.urlencode(query)
+        data = None
+        headers = {"Authorization": self.auth}
+        if body is not None:
+            data = json.dumps(body).encode()
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                status, ctype, payload = r.status, r.headers.get("Content-Type", ""), r.read(20_000_000)
+        except urllib.error.HTTPError as e:
+            status, ctype, payload = e.code, e.headers.get("Content-Type", ""), e.read(200_000)
+        except (urllib.error.URLError, OSError) as e:
+            self._resolved = 0   # look the name up again next time
+            raise PearlError(f"can't reach {self.host}: {getattr(e, 'reason', e)}")
+        if status == 401:
+            raise PearlError(f"{self.host} rejected the username or password")
+        if raw:
+            return status, ctype, payload
+        if "json" in ctype:
+            try:
+                return status, json.loads(payload)
+            except ValueError:
+                pass
+        return status, payload.decode("utf-8", "replace")
+
+    def get(self, path, default=None):
+        """GET an API v2 path, returning its result (or default on notfound/notallowed)."""
+        status, body = self.request("GET", API + path)
+        if isinstance(body, dict) and body.get("status") == "ok":
+            return body.get("result")
+        return default
+
+    # ---------------------------------------------------------- snapshots
+    # quick: what changes from moment to moment (signals, layouts in use,
+    # stream and recording state). full: that plus every setting.
+
+    def many(self, paths):
+        """GET several API v2 paths at once (the Pearl answers a few in parallel
+        much faster than one after another). {path: result or None}."""
+        paths = list(dict.fromkeys(paths))
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            return dict(zip(paths, ex.map(self.get, paths)))
+
+    def quick(self):
+        base = self.many(["/system/status", "/inputs/status", "/channels", "/recorders/status", "/outputs"])
+        chans = [str(c["id"]) for c in base["/channels"] or []]
+        outs = [o["id"] for o in base["/outputs"] or []]
+        more = self.many([f"/channels/{c}/{x}" for c in chans for x in ("status", "layouts", "publishers/status")]
+                         + [f"/outputs/{o}/status" for o in outs])
+        return {
+            "system_status": base["/system/status"] or {},
+            "input_status": {i["id"]: i.get("status", {}) for i in base["/inputs/status"] or []},
+            "channel_status": {c: more[f"/channels/{c}/status"] or {} for c in chans},
+            "layouts": {c: more[f"/channels/{c}/layouts"] or [] for c in chans},
+            "publisher_status": {c: more[f"/channels/{c}/publishers/status"] or [] for c in chans},
+            "recorder_status": {str(r["id"]): r.get("status", {}) for r in base["/recorders/status"] or []},
+            "output_status": {o: more[f"/outputs/{o}/status"] or {} for o in outs},
+        }
+
+    def full(self):
+        f = self.quick()
+        top = self.many(["/system/firmware", "/system/ident", "/inputs", "/channels", "/recorders", "/outputs",
+                         "/system/storages", "/system/presets", "/system/singletouchcontrol", "/afu/status",
+                         "/system/connectivity/details"])
+        f.update(firmware=top["/system/firmware"] or {}, ident=top["/system/ident"] or {},
+                 inputs=top["/inputs"] or [], channels=top["/channels"] or [], recorders=top["/recorders"] or [],
+                 outputs=top["/outputs"] or [], presets=top["/system/presets"] or [],
+                 singletouch=top["/system/singletouchcontrol"] or [], afu=top["/afu/status"] or [],
+                 connectivity=top["/system/connectivity/details"] or {})
+        chans = [str(c["id"]) for c in f["channels"]]
+        storages = [s["id"] for s in top["/system/storages"] or []]
+        second = self.many([f"/inputs/{i['id']}/settings" for i in f["inputs"]]
+                           + [f"/channels/{c}/layouts/{l['id']}/settings" for c in chans for l in f["layouts"].get(c, [])]
+                           + [f"/channels/{c}/publishers" for c in chans]
+                           + [f"/outputs/{o['id']}/settings" for o in f["outputs"]]
+                           + [f"/system/storages/{s}/status" for s in storages])
+        f["input_settings"] = {i["id"]: second[f"/inputs/{i['id']}/settings"] for i in f["inputs"]}
+        f["layout_settings"] = {c: {str(l["id"]): second[f"/channels/{c}/layouts/{l['id']}/settings"]
+                                    for l in f["layouts"].get(c, [])} for c in chans}
+        f["publishers"] = {c: second[f"/channels/{c}/publishers"] or [] for c in chans}
+        f["output_settings"] = {o["id"]: second[f"/outputs/{o['id']}/settings"] for o in f["outputs"]}
+        f["storages"] = {s: second[f"/system/storages/{s}/status"] for s in storages}
+        third = self.many([f"/channels/{c}/publishers/{p['id']}/settings" for c in chans for p in f["publishers"][c]])
+        f["publisher_settings"] = {c: {str(p["id"]): third[f"/channels/{c}/publishers/{p['id']}/settings"]
+                                       for p in f["publishers"][c]} for c in chans}
+        return f
+
+
+def stable(d):
+    """A hash that ignores what changes every second (audio levels, uptime, counters)."""
+    def strip(x):
+        if isinstance(x, dict):
+            return {k: strip(v) for k, v in x.items()
+                    if k not in ("levels", "uptime", "cpuload", "cputemp", "duration", "bitrate", "nosignal",
+                                 "actual_fps", "vrr", "clock_offset", "connection", "date", "cpuload_high")}
+        if isinstance(x, list):
+            return [strip(v) for v in x]
+        return x
+    return hashlib.sha256(json.dumps(strip(d), sort_keys=True).encode()).hexdigest()
+
+
+class Worker:
+    """Looks after one Pearl: snapshots on a timer in one thread, ops as they
+    arrive in another (so a slow snapshot never holds up a click)."""
+
+    def __init__(self, gw, conf):
+        self.gw = gw
+        self.pearl = Pearl(conf)
+        self.ops = []
+        self.cv = threading.Condition()
+        self.snap_cv = threading.Condition()
+        self.stop = False
+        self.next_full = 0
+        self.next_quick = 0
+        self.full = None
+        self.quick = None
+        self.sent_full = ("", 0)
+        self.sent_quick = ("", 0)
+        self.error = None
+        self.mv = None            # multiviewer job from the dashboard
+        self.mv_deadline = 0
+        self.mv_thread = None
+
+    def set_multiview(self, job):
+        """Called at each check-in. Frames keep flowing until the dashboard
+        stops asking (or we stop hearing from it)."""
+        if not job:
+            self.mv = None
+            return
+        self.mv = job
+        self.mv_deadline = time.time() + min(60, int(job.get("until_in") or 30))
+        if not self.mv_thread or not self.mv_thread.is_alive():
+            self.mv_thread = threading.Thread(target=self.mv_loop, daemon=True, name=f"mv-{self.pearl.id}")
+            self.mv_thread.start()
+
+    def mv_frame(self, t, width):
+        status, ctype, data = self.pearl.request("GET", f"{API}/{t['target']}/preview", {"resolution": str(width)},
+                                                 raw=True, timeout=10)
+        if status != 200 or not ctype.startswith("image/"):
+            return False
+        put = urllib.request.Request(t["upload_url"], data=data, method="PUT", headers={"Content-Type": "image/jpeg"})
+        with urllib.request.urlopen(put, timeout=20):
+            pass
+        self.gw.frame(self.pearl.id, t["target"])
+        return True
+
+    def mv_loop(self):
+        log(f"{self.pearl.name}: multiviewer on")
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            while not self.stop and self.mv and time.time() < self.mv_deadline:
+                job, t0 = self.mv, time.time()
+                def one(t, width=job.get("width", 480)):
+                    try:
+                        return self.mv_frame(t, width)
+                    except Exception as e:   # noqa: BLE001 - a missed frame is fine
+                        return e
+                list(ex.map(one, job.get("targets") or []))
+                time.sleep(max(0.2, float(job.get("every", 5)) - (time.time() - t0)))
+        log(f"{self.pearl.name}: multiviewer off")
+
+    def start(self):
+        threading.Thread(target=self.op_loop, daemon=True, name=f"ops-{self.pearl.id}").start()
+        threading.Thread(target=self.snap_loop, daemon=True, name=f"snap-{self.pearl.id}").start()
+
+    def close(self):
+        self.stop = True
+        for cv in (self.cv, self.snap_cv):
+            with cv:
+                cv.notify_all()
+
+    def add_ops(self, ops):
+        with self.cv:
+            self.ops += ops
+            self.cv.notify()
+
+    def refresh_soon(self, full=True):
+        with self.snap_cv:
+            self.next_quick = 0
+            if full:
+                self.next_full = 0
+            self.snap_cv.notify()
+
+    def intervals(self):
+        """(quick, full) seconds: fast while someone has the Pearl open."""
+        watched = self.pearl.snapshot_every <= 5
+        return (2, 15) if watched else (5, max(60, self.pearl.snapshot_every * 2))
+
+    def op_loop(self):
+        while not self.stop:
+            with self.cv:
+                while not self.ops and not self.stop:
+                    self.cv.wait()
+                ops, self.ops = self.ops, []
+            changed = False
+            for op in ops:
+                changed |= self.run_op(op)
+            if changed:
+                self.refresh_soon()
+
+    def snap_loop(self):
+        while not self.stop:
+            with self.snap_cv:
+                wait = min(self.next_full, self.next_quick) - time.time()
+                if wait > 0:
+                    self.snap_cv.wait(wait)
+                    continue
+            if self.stop:
+                return
+            now = time.time()
+            q, f = self.intervals()
+            try:
+                if now >= self.next_full:
+                    self.next_full, self.next_quick = now + f, now + q
+                    self.full, self.quick = self.pearl.full(), None
+                else:
+                    self.next_quick = now + q
+                    self.quick = self.pearl.quick()
+                if self.error:
+                    log(f"{self.pearl.name}: reachable again")
+                    # The dashboard has it marked unreachable: send the next
+                    # snapshot even if nothing in it changed.
+                    self.sent_full = self.sent_quick = ("", 0)
+                self.error = None
+                self.gw.wake()
+            except PearlError as e:
+                if self.error != str(e):
+                    log(f"{self.pearl.name}: {e}")
+                self.error = str(e)
+                self.next_full = self.next_quick = now + 10
+                self.gw.wake()
+            except Exception as e:   # noqa: BLE001 - keep going whatever a Pearl sends back
+                log(f"{self.pearl.name}: snapshot failed: {type(e).__name__}: {e}")
+                self.error = f"snapshot failed: {e}"
+                self.next_full = self.next_quick = now + 10
+
+    def run_op(self, op):
+        res = {"id": op["id"], "pearl": self.pearl.id}
+        try:
+            if op.get("method", "GET") not in METHODS or not PATH_RE.match(op.get("path") or "") or ".." in op["path"]:
+                raise PearlError(f"refusing {op.get('method')} {op.get('path')}: not a Pearl API call")
+            if op.get("kind") == "preview":
+                status, ctype, data = self.pearl.request("GET", op["path"], op.get("query"), raw=True, timeout=15)
+                if status != 200 or not ctype.startswith("image/"):
+                    raise PearlError(f"preview: HTTP {status} {data[:200].decode('utf-8', 'replace')}")
+                put = urllib.request.Request(op["upload_url"], data=data, method="PUT",
+                                             headers={"Content-Type": "image/jpeg"})
+                with urllib.request.urlopen(put, timeout=30):
+                    pass
+                res.update(ok=True, status=200, result={"bytes": len(data)})
+                changed = False
+            else:
+                status, body = self.pearl.request(op["method"], op["path"], op.get("query"), op.get("body"), timeout=30)
+                ok = 200 <= status < 300 and not (isinstance(body, dict) and body.get("status") not in (None, "ok"))
+                if isinstance(body, str) and len(body) > 100_000:
+                    body = body[:100_000] + "\n[truncated]"
+                res.update(ok=ok, status=status, result=body)
+                if not ok:
+                    res["error"] = (body.get("message") or body.get("status")) if isinstance(body, dict) else f"HTTP {status}"
+                changed = op["method"] != "GET"
+            log(f"{self.pearl.name}: {op.get('method', 'GET')} {op['path']} -> {res.get('status')}")
+        except Exception as e:   # noqa: BLE001
+            res.update(ok=False, error=str(e))
+            changed = False
+            log(f"{self.pearl.name}: {op.get('method')} {op['path']} failed: {e}")
+        self.gw.result(res)
+        return changed
+
+    def report(self):
+        """What to send at this check-in, if anything. unreport() takes it
+        back if it doesn't go (too big for this check-in, or the check-in
+        failed), so it's sent next time."""
+        self._before = (self.sent_full, self.sent_quick)
+        now = time.time()
+        if self.error:
+            return {"error": self.error}
+        if self.full is not None:
+            h = stable(self.full)
+            if h != self.sent_full[0] or now - self.sent_full[1] > 300:
+                self.sent_full = (h, now)
+                self.sent_quick = (stable(self.quick or {}), now)
+                return {"full": True, "data": {**self.full, **(self.quick or {})}}
+        if self.quick is not None:
+            h = stable(self.quick)
+            if h != self.sent_quick[0] or now - self.sent_quick[1] > 30:
+                self.sent_quick = (h, now)
+                return {"full": False, "data": self.quick}
+        return None
+
+    def unreport(self):
+        self.sent_full, self.sent_quick = self._before
+
+
+class Gateway:
+    def __init__(self, dashboard, gid, token):
+        self.url = dashboard.rstrip("/") + "/gateway/checkin"
+        self.auth = f"Gateway {gid}:{token}"
+        self.workers = {}
+        self.results = []
+        self.frames = {}
+        self.lock = threading.Lock()
+        self.event = threading.Event()
+        self.poll = 10
+        self.seen_ops = {}   # op id -> when we got it; the dashboard may send one again
+
+    def wake(self):
+        self.event.set()
+
+    def frame(self, pid, target):
+        with self.lock:
+            self.frames.setdefault(pid, {})[target] = int(time.time())
+
+    def result(self, r):
+        with self.lock:
+            self.results.append(r)
+        self.event.set()
+
+    def checkin(self):
+        with self.lock:
+            results, self.results = self.results, []
+            frames, self.frames = self.frames, {}
+        snaps, size, reported = {}, 0, []
+        # Start with a different Pearl each time so none waits for ever.
+        order = list(self.workers.items())
+        if order:
+            k = int(time.time()) % len(order)
+            order = order[k:] + order[:k]
+        for pid, w in order:
+            rep = w.report()
+            if not rep:
+                continue
+            n = len(json.dumps(rep))
+            if snaps and size + n > CHECKIN_BUDGET:
+                w.unreport()
+                self.event.set()   # check in again soon for the rest
+                continue
+            snaps[pid], size = rep, size + n
+            reported.append(w)
+        body = {"version": VERSION, "local_ips": local_ips(), "results": results, "snapshots": snaps, "frames": frames}
+        req = urllib.request.Request(self.url, data=json.dumps(body).encode(), method="POST",
+                                     headers={"Authorization": self.auth, "Content-Type": "application/json",
+                                              "User-Agent": f"pearl-gateway/{VERSION}"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                out = json.load(r)
+        except Exception:
+            with self.lock:   # send them again next time
+                self.results = results + self.results
+                for pid, fr in frames.items():
+                    self.frames.setdefault(pid, {}).update({k: v for k, v in fr.items() if k not in self.frames.get(pid, {})})
+            for w in reported:   # and these snapshots
+                w.unreport()
+            raise
+        self.poll = max(1, min(60, int(out.get("poll_interval") or 10)))
+        seen = set()
+        for conf in out.get("pearls") or []:
+            pid = conf["id"]
+            seen.add(pid)
+            w = self.workers.get(pid)
+            if w is None:
+                log(f"now looking after {conf.get('name') or pid} at {conf.get('host')}")
+                w = self.workers[pid] = Worker(self, conf)
+                w.start()
+                w.set_multiview(conf.get("multiview"))
+            else:
+                w.set_multiview(conf.get("multiview"))
+                before = (w.pearl.host, w.pearl.auth)
+                w.pearl.update(conf)
+                if (w.pearl.host, w.pearl.auth) != before:
+                    w.error = None
+                    w.refresh_soon()
+                # Watching started: refresh now rather than at the next slow tick.
+                q, f = w.intervals()
+                if w.next_quick > time.time() + q:
+                    w.refresh_soon(full=False)
+        for pid in set(self.workers) - seen:
+            log(f"no longer looking after {self.workers[pid].pearl.name}")
+            self.workers.pop(pid).close()
+        by_pearl = {}
+        now = time.time()
+        self.seen_ops = {k: t for k, t in self.seen_ops.items() if now - t < 3600}
+        for op in out.get("ops") or []:
+            if op.get("id") in self.seen_ops:
+                continue   # sent again because our answer was slow; it's running or done
+            self.seen_ops[op.get("id")] = now
+            by_pearl.setdefault(op.get("pearl"), []).append(op)
+        for pid, ops in by_pearl.items():
+            if pid in self.workers:
+                self.workers[pid].add_ops(ops)
+
+    def run(self):
+        log(f"pearl-gateway {VERSION} checking in at {self.url}")
+        fails = 0
+        while True:
+            self.event.clear()
+            try:
+                self.checkin()
+                if fails:
+                    log("dashboard reachable again")
+                fails = 0
+                wait = self.poll
+            except urllib.error.HTTPError as e:
+                fails += 1
+                msg = e.read(500).decode("utf-8", "replace")
+                log(f"check-in failed: HTTP {e.code} {msg}")
+                if e.code == 401:
+                    wait = 60
+                else:
+                    wait = min(60, 2 ** min(fails, 6))
+            except Exception as e:   # noqa: BLE001
+                fails += 1
+                if fails in (1, 5) or fails % 30 == 0:
+                    log(f"check-in failed: {e}")
+                wait = min(60, 2 ** min(fails, 6))
+            # Wake early when there are op results or a new snapshot to send,
+            # but not more than once a second.
+            self.event.wait(wait)
+            time.sleep(0.3 if self.results else 1.0 if wait > 1 else 0)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--dashboard", default=os.environ.get("PEARL_GATEWAY_DASHBOARD"), help="dashboard URL")
+    ap.add_argument("--id", default=os.environ.get("PEARL_GATEWAY_ID"), help="gateway ID from the dashboard")
+    ap.add_argument("--token-file", help="file holding the gateway token (or set PEARL_GATEWAY_TOKEN)")
+    a = ap.parse_args()
+    token = os.environ.get("PEARL_GATEWAY_TOKEN", "")
+    if a.token_file:
+        with open(a.token_file) as f:
+            token = f.read().strip()
+    if not (a.dashboard and a.id and token):
+        ap.error("need --dashboard, --id and a token (PEARL_GATEWAY_TOKEN or --token-file)")
+    Gateway(a.dashboard, a.id, token).run()
+
+
+if __name__ == "__main__":
+    main()
