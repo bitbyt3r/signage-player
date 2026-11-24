@@ -91,7 +91,6 @@ def validate(cfg):
     typed("display", "output", str)
     typed("display", "scale", (int, float), lambda v: 0.25 <= v <= 4, "must be 0.25 to 4")
     typed("display", "layout", str, lambda v: v in LAYOUTS, 'must be "screen" or "arch"')
-    typed("display", "max_fps", int, lambda v: v == 0 or 10 <= v <= 240, "must be 0 (off) or 10 to 240")
     # One page across several outputs, left to right (kiosk). Empty = off.
     typed("display", "span", list,
           lambda v: v == [] or (2 <= len(v) <= 4 and all(isinstance(o, str) and OUTPUT_RE.match(o) for o in v)
@@ -274,8 +273,6 @@ def apply_display(cfg):
         "scale": float(d.get("scale", 1.0)),
         # Outputs the page spans, left to right; [] = the usual single page.
         "span": list(d.get("span", [])),
-        # Firefox's frame rate cap (kiosk: layout.frame_rate); 0 = the monitor's.
-        "max_fps": int(d.get("max_fps", 0)),
     }
     write(RUN / "display.json", json.dumps(out, indent=2) + "\n")
 

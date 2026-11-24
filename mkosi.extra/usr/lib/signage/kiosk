@@ -159,15 +159,11 @@ fi
 
 # Firefox refuses a --profile directory that does not exist yet.
 mkdir -p "$HOME/firefox"
-# Prefs that follow the config, rewritten every start. Each is always
-# written, never left out: Firefox copies user.js into prefs.js, so a pref
-# dropped from here would keep its old value.
-max_fps=$(jq -r '.max_fps // 0' "$DISPLAY_JSON" 2>/dev/null)
-[[ $max_fps =~ ^[0-9]+$ && $max_fps -ge 10 ]] || max_fps=-1
+# Prefs for the player, rewritten every start. Firefox copies user.js into
+# prefs.js, so a pref dropped from here keeps its old value: set it back
+# explicitly instead of deleting the line.
 cat >"$HOME/firefox/user.js" <<PREFS
 // Written by /usr/lib/signage/kiosk at every start; edits are lost.
-// [display] max_fps: -1 is the monitor's refresh rate.
-user_pref("layout.frame_rate", $max_fps);
 // The player reports WebGL's renderer as a hint of how Firefox draws
 // (radeonsi or llvmpipe); Firefox otherwise reports a generic family name
 // ("Radeon R9 200 Series, or similar") that says neither.

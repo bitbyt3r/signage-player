@@ -19,7 +19,7 @@ SETTINGS_KEYS = {
     "device": {"name", "timezone"},
     "network": {"wifi"},
     "ntp": {"servers"},
-    "display": {"mode", "custom", "rotation", "output", "scale", "layout", "span", "max_fps"},
+    "display": {"mode", "custom", "rotation", "output", "scale", "layout", "span"},
 }
 
 
@@ -120,8 +120,6 @@ def settings(s):
             errs.append("display.span: 2 to 4 different output names, left to right, like DP-1")
         elif disp.get("layout") == "arch":
             errs.append("display.span: only works with the screen layout")
-    if "max_fps" in disp and not (is_int(disp["max_fps"]) and (disp["max_fps"] == 0 or 10 <= disp["max_fps"] <= 240)):
-        errs.append("display.max_fps: 0 (off) or 10 to 240")
     if "scale" in disp:
         sc = disp["scale"]
         if isinstance(sc, bool) or not isinstance(sc, (int, float)) or not 0.25 <= sc <= 4:

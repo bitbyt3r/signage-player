@@ -49,10 +49,6 @@ rotation = 0
 # The M715q has two DisplayPort outputs (DP-1, DP-2) and, on some units,
 # a third port module.
 # span = ["DP-1", "DP-2"]
-# Cap Firefox's frame rate, e.g. 30. Every animation then costs about half
-# the CPU, at the price of less smooth motion. 0 (the default) follows the
-# monitor's refresh rate.
-# max_fps = 0
 
 [player]
 # The player plays whatever program the dashboard assigns. With no program

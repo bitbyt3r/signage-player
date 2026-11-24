@@ -267,7 +267,6 @@ function settingsForm(dev, onSave) {
   if (s.display?.output && !outputs.some((o) => o.name === s.display.output)) output.append(h("option", { value: s.display.output }, s.display.output));
   output.value = s.display?.output || "";
   const scale = h("input", { type: "number", step: "0.05", min: "0.25", max: "4", value: s.display?.scale ?? "", placeholder: ph("display", "scale", "1.0") });
-  const maxFps = h("input", { type: "number", step: "1", min: "0", max: "240", value: s.display?.max_fps ?? "", placeholder: ph("display", "max_fps", "0 (monitor's rate)") });
   // Span: one page across 2 to 4 monitors, picked and ordered left to right.
   let span = [...(s.display?.span || [])];
   const spanBox = h("div", { class: "span-pick" });
@@ -348,7 +347,6 @@ function settingsForm(dev, onSave) {
     if (rot.value !== "") disp.rotation = Number(rot.value);
     if (output.value) disp.output = output.value;
     if (scale.value !== "") disp.scale = Number(scale.value);
-    if (maxFps.value !== "") disp.max_fps = Number(maxFps.value);
     if (span.length) disp.span = [...span];
     if (Object.keys(disp).length) out.display = disp;
     if (ntpOn.checked) out.ntp = { servers: ntp.value.split(/[\s,]+/).filter(Boolean) };
@@ -383,8 +381,7 @@ function settingsForm(dev, onSave) {
     h("label", { class: "field" }, h("span", {}, "Layout"), layout, archHint),
     h("label", { class: "field" }, h("span", {}, "Rotation"), rot),
     h("label", { class: "field" }, h("span", {}, "Output"), output),
-    h("label", { class: "field" }, h("span", {}, "Scale"), scale),
-    h("label", { class: "field" }, h("span", {}, "Max frame rate (30 halves animation CPU; 0 = off)"), maxFps)),
+    h("label", { class: "field" }, h("span", {}, "Scale"), scale)),
   h("div", { class: "field span-field" }, h("span", {}, "Span monitors (one page across several, left to right)"), spanBox, spanHint),
   h("h3", {}, "Network"),
   h("label", { class: "check" }, wifiOn, "Replace the stick's WiFi networks with these"),

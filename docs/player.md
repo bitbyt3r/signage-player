@@ -138,16 +138,6 @@ to `/run/signage/display.json`, and the kiosk links that into `/status/`.
   3840x2160 map the LED controller takes. `signage-config` sets
   `display.mode = "3840x2160"` unless a mode is given.
 
-### Frame rate cap
-
-`[display] max_fps = 30` (0, the default, is off; else 10 to 240) caps
-Firefox's frame rate: the kiosk writes it to the profile's `user.js` as
-`layout.frame_rate` at every start (and `-1` when off, since Firefox keeps a
-pref it has seen in `prefs.js`). Every animation, on the compositor or not,
-then costs about half the CPU at 30 fps on a 60 Hz monitor, for less smooth
-motion. The dashboard's device settings have it as *Max frame rate*; saving
-restarts the player.
-
 ### One page across several screens
 
 `[display] span = ["DP-1", "DP-2"]` (2 to 4 connectors, left to right,
