@@ -151,10 +151,30 @@ ln -sf /run/signage/agent.json "$STATUS_DIR/agent.json"
 ln -sf "$DISPLAY_JSON" "$STATUS_DIR/display.json"
 write_status
 ( while sleep 5; do write_status; done ) &
+status_pid=$!
 
 # signage-web is only ordered before us, not waited for; give it a moment.
 if [[ $URL == http://127.0.0.1:8080/* ]]; then
     for _ in $(seq 60); do curl -fs -o /dev/null http://127.0.0.1:8080/host/ && break; sleep 0.5; done
+fi
+
+# The biggest screen's size in pixels, as Firefox draws to it ("W H"), for
+# WebRender's tiles below. Nothing if wlr-randr can't say.
+screen_size() {
+    wlr-randr --json 2>/dev/null | jq -r '
+        [.[] | select(.enabled) | (.modes[] | select(.current)) as $m
+         | if (.transform | tostring | test("90|270")) then [$m.height, $m.width] else [$m.width, $m.height] end]
+        | max_by(.[0] * .[1]) // empty | "\(.[0]) \(.[1])"' 2>/dev/null
+}
+# WebRender keeps the page in tiles and draws again every tile that changed.
+# Its tiles are 1024x512, 32 of them on a 4K screen, and a full-screen
+# graphic with anything moving in it changes all of them on every frame: on
+# an M715q at 4K60 that bookkeeping alone kept Firefox's main process at
+# about 42% of a core. With one tile the size of the screen the same picture
+# takes about 24%.
+tile_w=1024 tile_h=512
+if read -r w h < <(screen_size) && [[ ${w:-} =~ ^[0-9]+$ && ${h:-} =~ ^[0-9]+$ ]] && (( w >= 1024 && h >= 512 )); then
+    tile_w=$w tile_h=$h
 fi
 
 # Firefox refuses a --profile directory that does not exist yet.
@@ -173,6 +193,9 @@ user_pref("webgl.sanitize-unmasked-renderer", false);
 // add-ons) until a start succeeds. A sign loses power or is restarted
 // mid-start often enough to trip that, so turn the count off.
 user_pref("toolkit.startup.max_resumed_crashes", -1);
+// One WebRender tile the size of the screen: see screen_size above.
+user_pref("gfx.webrender.picture-tile-width", $tile_w);
+user_pref("gfx.webrender.picture-tile-height", $tile_h);
 PREFS
 # The sign is powered off or rebooted without Firefox exiting cleanly, so
 # the profile always holds a "previous session". Drop it, or Firefox shows
@@ -182,4 +205,14 @@ rm -rf "$HOME/firefox/sessionstore.jsonlz4" "$HOME/firefox/sessionstore-backups"
 # (after starting the profiler with SIGUSR1). Costs nothing until then: the
 # profiler only runs between the two signals.
 export MOZ_UPLOAD_DIR=/var/lib/signage/profiles/.dump
-exec firefox-esr --kiosk --no-remote --profile "$HOME/firefox" "$URL"
+# Not exec: cage ends, and systemd starts the kiosk again, only when every
+# process holding the pipe cage gave this script has gone. With Firefox
+# exec'd over this script, the status loop above was still holding it after
+# Firefox died, so cage never noticed: the screen stayed black, with a
+# zombie Firefox, until someone restarted the service.
+firefox-esr --kiosk --no-remote --profile "$HOME/firefox" "$URL"
+rc=$?
+echo "kiosk: Firefox exited ($rc)" >&2
+pkill -P "$status_pid" 2>/dev/null
+kill "$status_pid" 2>/dev/null
+exit "$rc"
