@@ -54,6 +54,8 @@ const { chromium } = require('playwright');
   const page = await b.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: process.env.LIVE_SHOT ? 2 : 1 });
   page.on('console', (m) => console.error('page:', m.text()));
   await page.goto(process.argv[2]);
+  const codecs = await page.evaluate(() => RTCRtpReceiver.getCapabilities('video').codecs.map((c) => c.mimeType));
+  if (!codecs.includes('video/H264')) throw new Error('this Chromium has no H.264 for WebRTC, only ' + [...new Set(codecs)].join(' '));
   await page.waitForFunction(() => /Live/.test(document.querySelector('.panel .muted.small').textContent), null, { timeout: 30000 });
   await page.waitForFunction(() => /fps/.test(document.querySelector('.mono').textContent), null, { timeout: 15000 });
   await page.waitForTimeout(2500);
