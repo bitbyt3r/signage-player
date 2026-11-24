@@ -83,7 +83,21 @@ HDMI input's own "no signal" image does the logo.
 | `overrun` | 15 | With video still in, minutes a panel may run over |
 | `early` | off | `early=1` shows video that arrives between panels |
 | `now` | | Pretend it's this time (ISO 8601), for testing |
+| `offline` | 60 | Seconds without reaching the page's server before the page goes transparent |
 | `debug` | | `debug=1` shows the mode and why |
+
+## When things go wrong, the laptop wins
+
+Whenever the page can't do its job it goes transparent, so the room's HDMI
+input shows: no `room`, no schedule yet, room not found, or the page's server
+out of reach for `offline` seconds (checked with a HEAD of the page every
+15 s). Tested on the Pearl: when the server goes away the Pearl marks the
+Web Graphics input as errored after 10 to 20 s but keeps running the page it
+already has, so the page's own fallback is what you see.
+
+One gap: if the Pearl (re)starts while the server is unreachable, it can't
+load the page at all and shows an opaque "Failed to render the Web Output
+URL" card over the HDMI input.
 
 ## Tests
 

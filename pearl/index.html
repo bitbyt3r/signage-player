@@ -16,7 +16,12 @@
   &tz=America/New_York
   &pre= &post= &mingap= &overrun= (minutes)  &early=1
   &now=2027-01-08T15:58:00-05:00   pretend it's this time (testing)
+  &offline=60             seconds without reaching the server before the page
+                          goes transparent, so the room's laptop still shows
   &debug=1                show the mode and why in a corner
+
+  Whenever the page can't do its job (no room, no schedule yet, server out of
+  reach) it is transparent: the panel room's own HDMI input always wins.
 -->
 <style>
   :root { --gold: #E4BC60; --green: #2F9445; --dgreen: #0E5135; --brown: #301E12; --fg: #fff8ea; }
@@ -131,6 +136,20 @@ async function getJson(path) {
     } finally { clearTimeout(t); }
 }
 let fails = 0;
+// Last time we heard from the server the page came from: a HEAD of the page
+// every 15 s. (The schedule comes from MAGSched, a different server, and is
+// cached, so it doesn't count.)
+const OFFLINE_MS = (Number(q.get("offline")) || 60) * 1000;
+let lastContact = Date.now();
+async function heartbeat() {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 10000);
+    try {
+        const r = await fetch(location.href, { method: "HEAD", cache: "no-store", signal: ctl.signal });
+        if (r.ok) lastContact = Date.now();
+    } catch { /* offline */ } finally { clearTimeout(t); }
+    setTimeout(heartbeat, 15000);
+}
+heartbeat();
 async function refresh() {
     try {
         const [sessions, locations] = await Promise.all([getJson("/sessions?limit=-1"), getJson("/locations?limit=-1")]);
@@ -166,9 +185,11 @@ function tick() {
     const room = data && findRoom(q.get("room"), data.locations);
     let mode = "schedule", reason = "", d = null;
 
-    if (!q.get("room")) { reason = "no ?room= set"; }
-    else if (!data) { reason = fetchError ? `schedule unavailable: ${fetchError}` : "loading schedule"; }
-    else if (!room) { reason = `room "${q.get("room")}" not on the schedule`; }
+    // Anything that stops the page doing its job leaves it transparent.
+    if (Date.now() - lastContact > OFFLINE_MS) { mode = "passthrough"; reason = `server unreachable for ${Math.round((Date.now() - lastContact) / 1000)} s`; }
+    else if (!q.get("room")) { mode = "passthrough"; reason = "no ?room= set"; }
+    else if (!data) { mode = "passthrough"; reason = fetchError ? `schedule unavailable: ${fetchError}` : "loading schedule"; }
+    else if (!room) { mode = "passthrough"; reason = `room "${q.get("room")}" not on the schedule`; }
     else {
         d = decide({ sessions: roomSessions(data, room.id), now: t, signal, opts: OPTS, state });
         state = d.state; mode = d.mode; reason = d.reason;
