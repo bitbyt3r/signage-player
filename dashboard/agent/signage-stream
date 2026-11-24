@@ -397,22 +397,32 @@ class Stream:
             # Wait for the first bytes of video: a failure (no VAAPI, kmsgrab
             # refused) exits within a second or two.
             r, _, _ = select.select([p.stdout], [], [], 8)
+            # Readable also means EOF: an ffmpeg that dies at once (a
+            # missing library exits with 127) looks the same at first.
+            try:
+                p.wait(0.5)
+            except subprocess.TimeoutExpired:
+                pass
             if r and p.poll() is None:
                 threading.Thread(target=self.ffmpeg_log, args=(p,), daemon=True).start()
                 return p, ew, eh, "h264_vaapi" if hw else "libx264"
             p.kill()
             err = p.stderr.read().decode(errors="replace").strip()[-400:]
-            p.wait()
-            log(f"ffmpeg ({'VAAPI' if hw else 'x264'}) failed: {err}")
-            last = err
+            code = p.wait()
+            log(f"ffmpeg ({'VAAPI' if hw else 'x264'}) failed ({code}): {err}")
+            last = f"ffmpeg exited with {code}" + (f": {err}" if err else "")
         raise RuntimeError(f"couldn't capture the screen: {last or 'ffmpeg exited'}")
 
     def ffmpeg_log(self, p):
+        tail = []
         for line in p.stderr:
-            log("ffmpeg: " + line.decode(errors="replace").rstrip())
+            line = line.decode(errors="replace").rstrip()
+            log("ffmpeg: " + line)
+            tail = (tail + [line])[-2:]
         code = p.wait()
         if self.ffmpeg is p:
-            GLib.idle_add(self.stop, f"capture ended (ffmpeg exited with {code})")
+            why = f": {' / '.join(tail)[-300:]}" if tail else ""
+            GLib.idle_add(self.stop, f"capture ended (ffmpeg exited with {code}){why}")
 
     def build(self):
         source, out, outputs = self.pick_source()

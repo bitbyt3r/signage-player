@@ -34,6 +34,19 @@ for l in (r / "etc/passwd").read_text().splitlines():
         gecos = gecos.split(",")[0].replace('"', "") or "-"
         lines.append(f'u {name} {uid}:{gid} "{gecos}" {home} {shell}\n')
 (r / "usr/lib/sysusers.d/00-image.conf").write_text("".join(lines))
+
+# Debian's alternatives are symlinks in /etc/alternatives that /usr points
+# into (libblas.so.3 -> /etc/alternatives/... -> blas/libblas.so.3). /etc is
+# only written at install, so a package a /usr update adds would find its
+# alternatives missing: ffmpeg (through libsphinxbase -> libblas) failed to
+# start with exit 127 on players updated to 0.3.4. tmpfiles creates any that
+# are missing at boot and leaves existing ones alone.
+alts = r / "etc/alternatives"
+lines = ["# Generated at image build from /etc/alternatives (see mkosi.finalize).\n"]
+for a in sorted(alts.iterdir()):
+    if a.is_symlink():
+        lines.append(f"L /etc/alternatives/{a.name} - - - - {a.readlink()}\n")
+(r / "usr/lib/tmpfiles.d/00-image-alternatives.conf").write_text("".join(lines))
 PY
 
 rm -rf "$R/usr/share/factory/etc"

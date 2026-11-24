@@ -101,8 +101,10 @@ disk and in the release.
 
 - `/etc` is written once at install. A `/usr` update that changes a file in
   `/etc` doesn't reach installed players (new system users do, through the
-  generated `sysusers.d/00-image.conf`). Our own settings live in `/usr` or
-  are generated at boot, so this only matters for Debian package defaults.
+  generated `sysusers.d/00-image.conf`, and new Debian alternatives do,
+  through the generated `tmpfiles.d/00-image-alternatives.conf`). Our own
+  settings live in `/usr` or are generated at boot, so this only matters for
+  Debian package defaults.
 - With the stick still plugged in, the stick and the disk carry identical
   `/usr` partitions (same UUIDs). Both have the same content, so it works,
   but pull the stick after installing.

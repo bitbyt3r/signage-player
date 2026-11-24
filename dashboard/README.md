@@ -230,9 +230,9 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   turned upright using the device's rotation setting; *Rotate* corrects it
   if one comes out sideways. Mouse and keyboard arrive as a virtual USB
   tablet and keyboard, which disappear when the view closes. Needs OS
-  0.3.4 or later (on 0.3.4 a stream now and then connects without a
-  picture: press *Reconnect*); see *Live view through strict networks* if
-  it can't connect.
+  0.3.5 or later (0.3.4 has it too, but on players updated to it rather
+  than installed with it, ffmpeg can't start); see *Live view through
+  strict networks* if it can't connect.
 - **Terminal**: a root shell on the device, in the browser. The device opens
   the connection when asked (within a few seconds while you have its page
   open), so it works behind NAT. Close it with *Close* or `exit`.
