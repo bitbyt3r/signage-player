@@ -15,6 +15,7 @@ ln -sf ../lib/systemd/systemd-sysupdate /usr/bin/systemd-sysupdate
 # Diagnostics for the dashboard's web terminal.
 ln -sf ../lib/signage/signage-gfx /usr/bin/signage-gfx
 ln -sf ../lib/signage/signage-profile /usr/bin/signage-profile
+ln -sf ../lib/signage/signage-bios /usr/bin/signage-bios
 chmod 0644 /etc/pam.d/cage /etc/chrony/conf.d/signage.conf
 # Dashboard agent: lives with the dashboard in dashboard/agent/ so both sides
 # change together.

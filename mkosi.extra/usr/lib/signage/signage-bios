@@ -1,0 +1,106 @@
+#!/bin/bash
+# Sets the BIOS settings a sign wants, through think-lmi (Lenovo's WMI BIOS
+# settings driver: ThinkCentre, ThinkPad, ThinkStation). The installer runs
+# it once the disk is written; it can also be run by hand on a player.
+#
+#   signage-bios            apply the settings below
+#   signage-bios --dry-run  say what would change, change nothing
+#
+# It never fails the caller: a machine without think-lmi, a BIOS with a
+# supervisor password, a setting this model doesn't have, a value it doesn't
+# offer and a write the BIOS refuses are each reported and skipped. Changes
+# take effect at the next boot.
+#
+# Deliberately not touched: Secure Boot, the boot sequences, USB ports and
+# passwords. A wrong value there can leave a sign that doesn't boot or that
+# needs a keyboard to recover, and the boot order lists are a format a typo
+# breaks (docs/secure-boot.md covers those by hand).
+set -uo pipefail
+
+# name|value, exactly as think-lmi lists them (see bios-<serial>.txt on the
+# install stick). Names and values are from the M715q, BIOS M1XKT45A.
+SETTINGS=(
+    # Start again by itself when the power comes back.
+    "After Power Loss|Power On"
+    # ErP mode cuts standby power so far that the two settings around it
+    # (power on after a power cut, wake on LAN) stop working.
+    "Enhanced Power Saving Mode|Disabled"
+    # Wake on LAN on, booting the normal (Primary) sequence. "Automatic"
+    # boots the Automatic sequence instead, which tries the network first.
+    "Wake on LAN|Primary"
+    # The most memory this BIOS will reserve for the GPU ("Auto" can pick
+    # less). A 4K screen's buffers are 32 MB each.
+    "UMA Frame Buffer Size|512MB"
+    # Core Performance Boost (turbo) left to the CPU.
+    "CPB Mode|Auto"
+    # Fans favour cooling over quiet, so the CPU and GPU don't throttle in a
+    # warm enclosure. Not "Full Speed": that runs the fan flat out all the
+    # time, for noise and wear with nothing gained while it isn't throttling.
+    "ICE Performance Modes|Better Thermal Performance"
+    # Each of these can stop the boot at a prompt nobody is there to answer.
+    "Configuration Change Detection|Disabled"
+    "Chassis Intrusion Detection|Disabled"
+    "Dust Shield Alert|Disabled"
+)
+
+DRY=
+[[ ${1:-} == --dry-run ]] && DRY=1
+# SIGNAGE_BIOS_SYSFS: a fake tree, for tests.
+FA=${SIGNAGE_BIOS_SYSFS:-/sys/class/firmware-attributes/thinklmi}
+
+if [[ -z ${SIGNAGE_BIOS_SYSFS:-} ]]; then
+    modprobe think-lmi 2>/dev/null || true
+fi
+if [[ ! -d $FA/attributes ]]; then
+    echo "BIOS settings: this machine has no think-lmi interface; nothing set."
+    exit 0
+fi
+# With a supervisor password every write needs it, and we don't have it.
+if [[ $(cat "$FA/authentication/Admin/is_enabled" 2>/dev/null) == 1 ]]; then
+    echo "BIOS settings: a BIOS supervisor password is set; nothing set."
+    exit 0
+fi
+
+changed=0
+for s in "${SETTINGS[@]}"; do
+    name=${s%%|*} want=${s#*|}
+    dir=$FA/attributes/$name
+    if [[ ! -e $dir/current_value ]]; then
+        echo "  $name: not a setting on this model, skipped"
+        continue
+    fi
+    have=$(cat "$dir/current_value" 2>/dev/null)
+    if [[ $have == "$want" ]]; then
+        echo "  $name: already $want"
+        continue
+    fi
+    # Newer kernels separate possible_values with ";", older ones with ",".
+    offered=$(cat "$dir/possible_values" 2>/dev/null)
+    if [[ -n $offered ]] && ! tr ';,' '\n\n' <<<"$offered" | grep -qxF -- "$want"; then
+        echo "  $name: is $have; this BIOS doesn't offer $want (it has: $offered), skipped"
+        continue
+    fi
+    if [[ -n $DRY ]]; then
+        echo "  $name: $have -> $want (dry run, not written)"
+        continue
+    fi
+    if ! err=$( { printf '%s' "$want" >"$dir/current_value"; } 2>&1 ); then
+        echo "  $name: is $have; the BIOS refused $want (${err##*: }), skipped"
+        continue
+    fi
+    now=$(cat "$dir/current_value" 2>/dev/null)
+    if [[ $now == "$want" ]]; then
+        echo "  $name: $have -> $want"
+        changed=$((changed + 1))
+    else
+        echo "  $name: wrote $want but it still reads $now"
+    fi
+done
+if [[ -n $DRY ]]; then
+    echo "BIOS settings: dry run, nothing written."
+elif ((changed)); then
+    echo "BIOS settings: $changed changed; they apply at the next boot."
+else
+    echo "BIOS settings: nothing needed changing."
+fi
+exit 0
