@@ -24,11 +24,24 @@ One layout on the channel that feeds the HDMI output (the projector):
    this page.
 
 Between panels the page is opaque and covers the HDMI input. During a panel
-it goes transparent. *This depends on the Pearl's web renderer keeping the
-page's transparency, which Epiphan doesn't document; it still needs a test
-on the device.* If it doesn't, the fallback is two layouts (schedule, HDMI-A)
-switched by `PUT /api/v2.0/channels/{cid}/layouts/active?id=` from
-`pearl-bridge.py`.
+it goes transparent. Tested on a Pearl Mini (firmware 4.24.7): the Web
+Graphics renderer keeps the page's transparent background, and the HDMI
+input (or the layout background) shows through.
+
+The layout can be set through the API, though the endpoint isn't in
+Epiphan's published spec: `PUT /api/v2.0/channels/{cid}/layouts/{lid}/settings`
+with sources `D2P0.hdmi-a` and `WEBG1`, e.g.
+
+```json
+{"video": [
+  {"type": "source", "position": {"top": 0, "bottom": 0, "left": 0, "right": 0, "keep_aspect_ratio": true}, "settings": {"source": "D2P0.hdmi-a"}},
+  {"type": "source", "position": {"top": 0, "bottom": 0, "left": 0, "right": 0, "keep_aspect_ratio": true}, "settings": {"source": "WEBG1"}}],
+ "audio": [{"type": "source", "settings": {"source": "D2P0.hdmi-a-audio"}}],
+ "background": "#000000"}
+```
+
+and the page URL with `PATCH /api/v2.0/inputs/WEBG1/settings`
+`{"web_graphics": {"url": "..."}}`.
 
 ## Knowing whether video is coming in
 

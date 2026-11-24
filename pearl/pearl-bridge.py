@@ -31,7 +31,7 @@ import time
 import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
-PACKAGES = HERE.parent / "packages"
+PACKAGES = (HERE.parent / "packages").resolve()
 
 
 def has_video(status):
@@ -110,7 +110,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def log_message(self, fmt, *args):
-        if "/status" not in (args[0] if args else ""):
+        if "/status" not in str(args[0] if args else ""):
             super().log_message(fmt, *args)
 
 
