@@ -3,7 +3,7 @@ import { gzImageStream, imageStream, saveStream } from "./image.js";
 import { initParams, overrideForm, schemaForm, withOrder } from "./params.js";
 import { initLive, openLive } from "./live.js";
 import { initPerf, perfPanel } from "./perf.js";
-import { initPearls, viewPearl, viewPearls } from "./pearls.js";
+import { initPearls, viewMultiview, viewPearl, viewPearls } from "./pearls.js";
 import { initPreview, previewPanel } from "./preview.js";
 import { bundledZips, listZip, readEntry } from "./zip.js";
 
@@ -1299,6 +1299,7 @@ async function router() {
     else if (page === "programs") await viewPrograms();
     else if (page === "packages") await viewPackages();
     else if (page === "images") await viewImages();
+    else if (page === "pearls" && id === "multiview") await viewMultiview();
     else if (page === "pearls" && id) await viewPearl(id);
     else if (page === "pearls") await viewPearls();
     else await viewDevices();

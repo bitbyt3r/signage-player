@@ -409,6 +409,14 @@ def gateway_checkin(req):
             c.put({"pk": p["pk"], "sk": "SNAP#STATUS", "data": raw, "at": now})
         p.update(c.update(p["pk"], "META", {"snapshot_at": now, "error": ""}))
 
+    # Multiviewer frames uploaded since the last check-in: {pid: {target: time}}.
+    for pid, fr in (body.get("frames") or {}).items():
+        p = pearls.get(pid)
+        if p and isinstance(fr, dict) and fr:
+            old = c.loads(p.get("mv_frames"), {})
+            old.update({str(k)[:80]: int(v) for k, v in fr.items() if isinstance(v, (int, float))})
+            p.update(c.update(p["pk"], "META", {"mv_frames": c.dumps(old)}))
+
     # Results of ops.
     for r in body.get("results") or []:
         p = pearls.get(str(r.get("pearl", "")))
@@ -431,10 +439,11 @@ def gateway_checkin(req):
     for pid, p in pearls.items():
         watched = int(p.get("watch_until", 0)) > now
         busy = int(p.get("ops_until", 0)) > now
-        fast = fast or watched or busy
+        mv = mv_for_gateway(p, now)
+        fast = fast or watched or busy or bool(mv)
         out_pearls.append({"id": pid, "name": p.get("name", ""), "host": p.get("host", ""),
                            "username": p.get("username", "admin"), "password": p.get("password", ""),
-                           "snapshot_every": SNAP_FAST if watched else SNAP_SLOW})
+                           "snapshot_every": SNAP_FAST if watched else SNAP_SLOW, "multiview": mv})
         if not busy:
             continue
         for x in c.query(p["pk"], "OP#"):
@@ -456,3 +465,97 @@ def gateway_checkin(req):
             ops.append(send)
     return resp(200, {"server_time": time.time(), "poll_interval": GW_POLL_FAST if fast or ops else GW_POLL,
                       "pearls": out_pearls, "ops": ops})
+
+
+# ------------------------------------------------------------------ multiviewer
+# While a multiviewer is open the gateways upload preview frames of the
+# chosen sources straight to S3, one fixed key per source, every few
+# seconds; the browser polls /api/pearls/multiview for fresh URLs and frame
+# times and only reloads tiles that changed. Nothing is stored per frame.
+
+MV_TTL = 45                 # keep streaming this long after the last poll
+MV_EVERY = (2, 5, 10, 30)
+MV_WIDTHS = (320, 480, 640, 960)
+MV_SHOW = ("inputs", "outputs", "both")
+
+
+def mv_targets(snap, show):
+    """[(target, label, kind)] for a Pearl's snapshot: video inputs that
+    exist (not unplugged USB), and/or the HDMI outputs and channels."""
+    out = []
+    if show in ("inputs", "both"):
+        for i in snap.get("inputs") or []:
+            if not i.get("video"):
+                continue
+            st = ((snap.get("input_status") or {}).get(i["id"]) or {}).get("video") or {}
+            if i.get("type") == "usb" and st.get("state") != "active":
+                continue
+            out.append((f"inputs/{i['id']}", i.get("name") or i["id"], "input"))
+    if show in ("outputs", "both"):
+        chans = {str(ch["id"]): ch.get("name", ch["id"]) for ch in snap.get("channels") or []}
+        for o in snap.get("outputs") or []:
+            src = ((snap.get("output_settings") or {}).get(o["id"]) or {}).get("source")
+            label = f"{o.get('name') or o['id']} out" + (f" ({chans.get(str(src), src)})" if src else "")
+            out.append((f"outputs/{o['id']}", label, "output"))
+        for cid, name in chans.items():
+            out.append((f"channels/{cid}", name, "channel"))
+    return out
+
+
+def mv_key(pid, target):
+    return f"pearl-mv/{pid}/{target.replace('/', '_')}.jpg"
+
+
+@route("POST", "/api/pearls/multiview")
+def multiview(req):
+    """Start or keep up a multiviewer and get its tiles.
+    {"pearls": [ids] (default all), "show": inputs|outputs|both, "every": s, "width": px}"""
+    body = req.json()
+    show = body.get("show", "both")
+    if show not in MV_SHOW:
+        raise HttpError(400, f"show: one of {', '.join(MV_SHOW)}")
+    every = body.get("every", 5)
+    width = body.get("width", 480)
+    if every not in MV_EVERY:
+        raise HttpError(400, f"every: one of {MV_EVERY}")
+    if width not in MV_WIDTHS:
+        raise HttpError(400, f"width: one of {MV_WIDTHS}")
+    want = body.get("pearls")
+    items = [p for p in c.by_kind("pearl") if not want or p["id"] in want]
+    items.sort(key=lambda p: (p.get("room", "").lower(), p.get("name", "").lower()))
+    now = c.now()
+    pearls = []
+    for item in items:
+        v = pearl_view(item, full=True)
+        snap = v.pop("snapshot")
+        targets = mv_targets(snap, show)
+        conf = {"targets": [t for t, _, _ in targets], "every": every, "width": width, "until": now + MV_TTL}
+        old = c.loads(item.get("mv"), {})
+        if {k: old.get(k) for k in ("targets", "every", "width")} != {k: conf[k] for k in ("targets", "every", "width")} \
+                or int(old.get("until", 0)) < now + MV_TTL - 15:
+            c.update(item["pk"], "META", {"mv": c.dumps(conf)})
+        frames = c.loads(item.get("mv_frames"), {})
+        sigs = {i["id"]: i["signal"] for i in v["summary"].get("inputs", [])}
+        tiles = []
+        for t, label, kind in targets:
+            at = int(frames.get(t, 0))
+            tile = {"target": t, "label": label, "kind": kind, "at": at}
+            if kind == "input":
+                tile["signal"] = sigs.get(t.split("/", 1)[1])
+            if at:
+                tile["url"] = c.s3().generate_presigned_url(
+                    "get_object", Params={"Bucket": c.BUCKET, "Key": mv_key(item["id"], t)}, ExpiresIn=600)
+            tiles.append(tile)
+        pearls.append({k: v[k] for k in ("id", "name", "room", "host", "online", "error", "gateway_online")} | {"tiles": tiles})
+    return resp(200, {"pearls": pearls, "server_time": time.time()})
+
+
+def mv_for_gateway(p, now):
+    """The multiviewer job for this Pearl's gateway, with upload URLs, or None."""
+    conf = c.loads(p.get("mv"), {})
+    if int(conf.get("until", 0)) <= now or not conf.get("targets"):
+        return None
+    return {"every": conf["every"], "width": conf["width"], "until_in": int(conf["until"]) - now,
+            "targets": [{"target": t, "upload_url": c.s3().generate_presigned_url(
+                "put_object", Params={"Bucket": c.BUCKET, "Key": mv_key(p["id"], t), "ContentType": "image/jpeg"},
+                ExpiresIn=600)} for t in conf["targets"]]}

@@ -224,6 +224,7 @@ export async function viewPearls() {
   setView(
     h("div", { class: "row spread" }, h("h1", {}, "Pearls"),
       h("div", { class: "row" }, h("span", { class: "muted small" }, `${pearls.filter((p) => p.online).length} of ${pearls.length} online`),
+        h("a", { class: "button", href: "#/pearls/multiview" }, "Multiviewer"),
         h("button", { class: "primary", onclick: showAdd }, "Add Pearl"))),
     addBox,
     h("div", { class: "panel" }, bulkBar,
@@ -652,4 +653,82 @@ export async function viewPearl(id) {
   pearlForm(p, g.gateways, async (b) => { p = { ...p, ...(await api("PATCH", `/api/pearls/${id}`, b)) }; toast("Saved"); refresh(); }));
   setView(head, body, h("button", { class: "ghost", onclick: () => { settingsBox.hidden = !settingsBox.hidden; } }, "Settings (address, password, gateway)"), settingsBox);
   every(3000, refresh);
+}
+
+// ------------------------------------------------------------ multiviewer
+
+// Live thumbnails from every Pearl. While this page is open the dashboard
+// asks each gateway to push a preview frame per input/output every few
+// seconds; it stops on its own shortly after the page closes.
+const MV_PREFS = "pearl-multiview";
+
+export async function viewMultiview() {
+  let prefs = { show: "both", every: 5, width: 480 };
+  try { prefs = { ...prefs, ...JSON.parse(localStorage.getItem(MV_PREFS) || "{}") }; } catch { /* defaults */ }
+  const grid = h("div", { class: "mv-grid" });
+  const note = h("span", { class: "muted small" });
+  const tiles = new Map();   // pid|target -> {el, img, meta, at}
+
+  const select = (key, options, label) => h("label", { class: "row small" }, label,
+    h("select", { onchange: (e) => { prefs[key] = isNaN(+e.target.value) ? e.target.value : +e.target.value; save(); poll(); schedule(); } },
+      options.map(([v, t]) => h("option", { value: v, selected: String(prefs[key]) === String(v) }, t))));
+  function save() { try { localStorage.setItem(MV_PREFS, JSON.stringify(prefs)); } catch { /* fine */ } }
+
+  function tile(p, t) {
+    const key = `${p.id}|${t.target}`;
+    let rec = tiles.get(key);
+    if (!rec) {
+      const img = h("img", { alt: "" });
+      const meta = h("div", { class: "mv-meta small" });
+      const el = h("figure", { class: "mv-tile", title: "Click for a full-size frame",
+        onclick: () => showPreview(p.id, t.target, `${p.name}: ${t.label}`) }, img, meta);
+      rec = { el, img, meta, at: 0 };
+      tiles.set(key, rec);
+    }
+    if (t.at && t.at !== rec.at && t.url) {
+      const next = new Image();   // swap when loaded so tiles don't flash
+      next.onload = () => { rec.img.src = next.src; rec.el.classList.remove("waiting"); };
+      next.src = t.url;
+      rec.at = t.at;
+    }
+    rec.el.classList.toggle("waiting", !rec.at);
+    rec.el.style.width = `${prefs.width}px`;
+    const age = rec.at ? Math.max(0, Math.round(Date.now() / 1000 - rec.at)) : null;
+    rec.el.classList.toggle("stale", age != null && age > prefs.every * 3 + 10);
+    rec.meta.replaceChildren(
+      h("b", {}, t.label), " ",
+      t.kind === "input" ? sig(t.signal) : h("span", { class: "muted" }, t.kind),
+      h("span", { class: "muted" }, age == null ? " waiting for a frame…" : ` ${age}s ago`));
+    return rec.el;
+  }
+
+  async function poll() {
+    const d = await api("POST", "/api/pearls/multiview", { show: prefs.show, every: prefs.every, width: prefs.width });
+    const seen = new Set();
+    grid.replaceChildren(...d.pearls.map((p) => {
+      p.tiles.forEach((t) => seen.add(`${p.id}|${t.target}`));
+      const why = !p.gateway_online ? "gateway offline" : !p.online ? (p.error || "offline") : !p.tiles.length ? "nothing to show yet" : "";
+      return h("section", { class: "panel mv-pearl" },
+        h("div", { class: "row spread" },
+          h("div", {}, h("span", { class: `dot ${p.online ? "on" : "off"}` }), h("a", { href: `#/pearls/${p.id}` }, h("b", {}, p.name)),
+            h("span", { class: "muted small" }, ` ${p.room || ""} · ${p.host}`)),
+          why ? h("span", { class: "bad small" }, why) : ""),
+        h("div", { class: "mv-tiles" }, p.tiles.map((t) => tile(p, t))));
+    }));
+    for (const k of [...tiles.keys()]) if (!seen.has(k)) tiles.delete(k);
+    if (!d.pearls.length) grid.replaceChildren(h("div", { class: "panel empty" }, "No Pearls yet. Add them on the Pearls page."));
+    note.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+  }
+  const schedule = () => every(prefs.every * 1000, poll);
+
+  setView(
+    h("div", { class: "row spread" }, h("h1", {}, "Pearl multiviewer"), h("a", { href: "#/pearls" }, "← Pearls")),
+    h("div", { class: "panel row" },
+      select("show", [["inputs", "Inputs"], ["outputs", "Outputs"], ["both", "Inputs and outputs"]], "Show"),
+      select("every", [[2, "2 s"], [5, "5 s"], [10, "10 s"], [30, "30 s"]], "Refresh every"),
+      select("width", [[320, "Small"], [480, "Medium"], [640, "Large"], [960, "Huge"]], "Tiles"),
+      note),
+    grid);
+  await poll();
+  schedule();
 }

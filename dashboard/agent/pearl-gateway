@@ -205,6 +205,46 @@ class Worker:
         self.sent_full = ("", 0)
         self.sent_quick = ("", 0)
         self.error = None
+        self.mv = None            # multiviewer job from the dashboard
+        self.mv_deadline = 0
+        self.mv_thread = None
+
+    def set_multiview(self, job):
+        """Called at each check-in. Frames keep flowing until the dashboard
+        stops asking (or we stop hearing from it)."""
+        if not job:
+            self.mv = None
+            return
+        self.mv = job
+        self.mv_deadline = time.time() + min(60, int(job.get("until_in") or 30))
+        if not self.mv_thread or not self.mv_thread.is_alive():
+            self.mv_thread = threading.Thread(target=self.mv_loop, daemon=True, name=f"mv-{self.pearl.id}")
+            self.mv_thread.start()
+
+    def mv_frame(self, t, width):
+        status, ctype, data = self.pearl.request("GET", f"{API}/{t['target']}/preview", {"resolution": str(width)},
+                                                 raw=True, timeout=10)
+        if status != 200 or not ctype.startswith("image/"):
+            return False
+        put = urllib.request.Request(t["upload_url"], data=data, method="PUT", headers={"Content-Type": "image/jpeg"})
+        with urllib.request.urlopen(put, timeout=20):
+            pass
+        self.gw.frame(self.pearl.id, t["target"])
+        return True
+
+    def mv_loop(self):
+        log(f"{self.pearl.name}: multiviewer on")
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            while not self.stop and self.mv and time.time() < self.mv_deadline:
+                job, t0 = self.mv, time.time()
+                def one(t, width=job.get("width", 480)):
+                    try:
+                        return self.mv_frame(t, width)
+                    except Exception as e:   # noqa: BLE001 - a missed frame is fine
+                        return e
+                list(ex.map(one, job.get("targets") or []))
+                time.sleep(max(0.2, float(job.get("every", 5)) - (time.time() - t0)))
+        log(f"{self.pearl.name}: multiviewer off")
 
     def start(self):
         threading.Thread(target=self.op_loop, daemon=True, name=f"ops-{self.pearl.id}").start()
@@ -333,12 +373,17 @@ class Gateway:
         self.auth = f"Gateway {gid}:{token}"
         self.workers = {}
         self.results = []
+        self.frames = {}
         self.lock = threading.Lock()
         self.event = threading.Event()
         self.poll = 10
 
     def wake(self):
         self.event.set()
+
+    def frame(self, pid, target):
+        with self.lock:
+            self.frames.setdefault(pid, {})[target] = int(time.time())
 
     def result(self, r):
         with self.lock:
@@ -348,12 +393,13 @@ class Gateway:
     def checkin(self):
         with self.lock:
             results, self.results = self.results, []
+            frames, self.frames = self.frames, {}
         snaps = {}
         for pid, w in list(self.workers.items()):
             rep = w.report()
             if rep:
                 snaps[pid] = rep
-        body = {"version": VERSION, "local_ips": local_ips(), "results": results, "snapshots": snaps}
+        body = {"version": VERSION, "local_ips": local_ips(), "results": results, "snapshots": snaps, "frames": frames}
         req = urllib.request.Request(self.url, data=json.dumps(body).encode(), method="POST",
                                      headers={"Authorization": self.auth, "Content-Type": "application/json",
                                               "User-Agent": f"pearl-gateway/{VERSION}"})
@@ -363,6 +409,8 @@ class Gateway:
         except Exception:
             with self.lock:   # send them again next time
                 self.results = results + self.results
+                for pid, fr in frames.items():
+                    self.frames.setdefault(pid, {}).update({k: v for k, v in fr.items() if k not in self.frames.get(pid, {})})
             for w in self.workers.values():
                 w.sent_full = ("", 0)
                 w.sent_quick = ("", 0)
@@ -377,7 +425,9 @@ class Gateway:
                 log(f"now looking after {conf.get('name') or pid} at {conf.get('host')}")
                 w = self.workers[pid] = Worker(self, conf)
                 w.start()
+                w.set_multiview(conf.get("multiview"))
             else:
+                w.set_multiview(conf.get("multiview"))
                 before = (w.pearl.host, w.pearl.auth)
                 w.pearl.update(conf)
                 if (w.pearl.host, w.pearl.auth) != before:

@@ -150,3 +150,31 @@ def test_no_gateway_and_delete(aws):
     assert s == 409   # still has a Pearl
     assert call("DELETE", f"/api/pearls/{p2['id']}", token=tok)[0] == 200
     assert call("DELETE", f"/api/gateways/{gw[0]}", token=tok)[0] == 200
+
+
+def test_multiview(aws):
+    tok = login()
+    gw, p = setup(tok)
+    gw_call(gw, {"snapshots": {p["id"]: {"full": True, "data": SNAP}}})
+    s, _ = call("POST", "/api/pearls/multiview", {"show": "everything"}, token=tok)
+    assert s == 400
+    s, d = call("POST", "/api/pearls/multiview", {"show": "inputs", "every": 2, "width": 320}, token=tok)
+    assert s == 200
+    tiles = d["pearls"][0]["tiles"]
+    assert [t["target"] for t in tiles] == ["inputs/hdmi-a", "inputs/WEBG1"]
+    assert tiles[0]["signal"] is False and "url" not in tiles[0]
+    # The gateway gets the job with upload URLs and polls fast.
+    s, out = gw_call(gw, {})
+    mv = out["pearls"][0]["multiview"]
+    assert mv["every"] == 2 and mv["width"] == 320 and 0 < mv["until_in"] <= 45
+    assert [t["target"] for t in mv["targets"]] == ["inputs/hdmi-a", "inputs/WEBG1"]
+    assert mv["targets"][0]["upload_url"].startswith("https://") and out["poll_interval"] == 2
+    # Frames it reports show up as tiles with URLs.
+    gw_call(gw, {"frames": {p["id"]: {"inputs/WEBG1": 1234}}})
+    s, d = call("POST", "/api/pearls/multiview", {"show": "both", "every": 2, "width": 320}, token=tok)
+    tiles = {t["target"]: t for t in d["pearls"][0]["tiles"]}
+    assert set(tiles) == {"inputs/hdmi-a", "inputs/WEBG1", "outputs/D1", "channels/1"}
+    assert tiles["inputs/WEBG1"]["at"] == 1234 and tiles["inputs/WEBG1"]["url"].startswith("https://")
+    assert tiles["outputs/D1"]["label"] == "HDMI out (HDMI-A)"
+    s, out = gw_call(gw, {})
+    assert len(out["pearls"][0]["multiview"]["targets"]) == 4

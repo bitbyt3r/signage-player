@@ -202,3 +202,11 @@ details.preview > summary { cursor: pointer; }
 textarea.json { min-height: 360px; }
 pre.result { background: var(--code); border-radius: 6px; padding: 8px; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .bulk { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+
+/* Pearl multiviewer */
+.mv-grid { display: flex; flex-direction: column; gap: 12px; }
+.mv-tiles { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; }
+.mv-tile { margin: 0; max-width: 100%; cursor: pointer; }
+.mv-tile img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: #000; border-radius: 6px; }
+.mv-tile.stale img { opacity: 0.4; }
+.mv-meta { padding: 4px 2px; }

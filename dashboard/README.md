@@ -324,6 +324,14 @@ only what changed, and runs the API calls you make in the dashboard
   *Pearl admin page* links to the Pearl itself, for what the API can't do
   (creating layouts, uploading images, network settings); it only works from
   a computer on the Pearl's network.
+- **The multiviewer** (*Pearls → Multiviewer*) shows a live thumbnail of
+  every Pearl's inputs, its HDMI output and channels, or both, refreshed
+  every 2, 5, 10 or 30 s at a choice of sizes; click one for a full-size
+  frame. While it's open each gateway fetches the previews and uploads them
+  straight to S3 (`pearl-mv/`, one object per tile, overwritten each time),
+  and it stops by itself within a minute of the page closing. Each tile
+  costs the Pearl one preview encode per refresh, so use *Small* and a
+  slower refresh for a big fleet.
 
 The panel room page the Graphics input shows is in [`../pearl/`](../pearl/).
 
