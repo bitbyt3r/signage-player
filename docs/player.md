@@ -357,15 +357,25 @@ A quick look at how the player renders:
 
 - **GPU**: from `lspci`, or `/sys/class/drm/card*/device` when lspci isn't
   installed (vendor, device ID, kernel driver).
-- **Firefox rendering**: which Mesa driver Firefox's processes have mapped
-  (`/proc/<pid>/maps`):
-  - `WebRender/GL: HARDWARE (radeonsi)`: WebRender draws with the AMD GPU.
+- **Firefox rendering**: how the browser process (it runs WebRender) draws,
+  from the Mesa library it has mapped (`/proc/<pid>/maps`) and the GPU
+  device nodes it has open (`/proc/<pid>/fd`):
+  - `WebRender: HARDWARE (radeonsi)`: WebRender draws with the AMD GPU.
     This is what a sign should show.
-  - `WebRender/GL: SOFTWARE (llvmpipe/swrast)`: Mesa's CPU rasteriser, so
-    the GPU isn't being used (no `/dev/dri` access, a missing driver, or a
-    blocklisted GPU). Expect high CPU and dropped frames.
-  - `SOFTWARE (no Mesa driver mapped: ...)`: Firefox fell back to its own
-    software WebRender, the same problem as above.
+  - `WebRender: probably HARDWARE (Mesa loaded, /dev/dri/... open)`: the same
+    with Mesa 24.2 and later (Debian 13 has 25.0), which puts every driver in
+    one `libgallium-*.so`, so the library no longer names the driver.
+    radeontop showing 0% GPU while graphics move means it isn't drawing on
+    the GPU after all.
+  - `WebRender: SOFTWARE (llvmpipe/swrast)`, `SOFTWARE?` (Mesa loaded, no
+    `/dev/dri` device open) or `SOFTWARE (no Mesa driver ...)`: the CPU draws
+    every frame (no `/dev/dri` access, a missing driver, or a blocklisted
+    GPU). Expect high CPU and dropped frames.
+
+  Then the browser process's busiest threads over one second. `Renderer` and
+  `WRWorker*` near the top mean drawing on the CPU (software WebRender);
+  `WRRenderBackend`, `WRSceneBuilder` and `Compositor` are the scene work
+  every frame that changes costs either way.
 - **Player**: the renderer and the last frame stats from
   `/run/signage/perf.json`, and what's on screen. The renderer string
   comes from WebGL's `WEBGL_debug_renderer_info` on a throwaway canvas at

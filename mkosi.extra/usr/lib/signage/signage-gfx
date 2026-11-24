@@ -26,24 +26,37 @@ else
 fi
 
 h "Firefox rendering"
-pids=$(pgrep -x firefox-esr; pgrep -f 'firefox-esr.*-contentproc' ; pgrep -x 'Web Content'; pgrep -x 'GPU Process')
-pids=$(echo "$pids" | sort -un | tr '\n' ' ')
-if [[ -z ${pids// } ]]; then
-    echo "WebRender/GL: unknown (Firefox isn't running)"
+# The browser process (not a -contentproc child) runs WebRender.
+main=""
+for p in $(pgrep -u signage -x firefox-esr); do
+    tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | grep -q -- '-contentproc' || { main=$p; break; }
+done
+if [[ -z $main ]]; then
+    echo "WebRender: unknown (Firefox isn't running)"
 else
-    libs=$(for p in $pids; do cat "/proc/$p/maps" 2>/dev/null; done | grep -oE '[^/ ]*(_dri\.so|libgallium[^/ ]*\.so[^ ]*)' | sort -u)
-    if grep -q radeonsi <<<"$libs"; then
-        echo "WebRender/GL: HARDWARE (radeonsi)"
-    elif grep -qE 'iris|crocus|i965|nouveau|virtio_gpu' <<<"$libs"; then
-        echo "WebRender/GL: HARDWARE ($(grep -oE 'iris|crocus|i965|nouveau|virtio_gpu' <<<"$libs" | head -1))"
-    elif grep -qE 'swrast|llvmpipe|kms_swrast' <<<"$libs"; then
-        echo "WebRender/GL: SOFTWARE (llvmpipe/swrast)"
+    libs=$(grep -oE '[^/ ]*(_dri\.so|libgallium[^/ ]*\.so[^ ]*)' "/proc/$main/maps" 2>/dev/null | sort -u)
+    dri=$(ls -l "/proc/$main/fd" 2>/dev/null | grep -oE '/dev/dri/[a-zA-Z0-9]+' | sort -u | tr '\n' ' ')
+    # Mesa 24.2 and later put every driver in one libgallium, so the mapped
+    # library no longer names the driver; an open GPU device node still
+    # tells hardware WebRender from software (SWGL draws on the CPU).
+    if grep -qE 'radeonsi|iris|crocus|i965|nouveau|virtio_gpu' <<<"$libs"; then
+        echo "WebRender: HARDWARE ($(grep -oE 'radeonsi|iris|crocus|i965|nouveau|virtio_gpu' <<<"$libs" | head -1))"
+    elif grep -qE 'swrast|llvmpipe' <<<"$libs"; then
+        echo "WebRender: SOFTWARE (llvmpipe/swrast)"
+    elif [[ -n $dri && -n $libs ]]; then
+        echo "WebRender: probably HARDWARE (Mesa loaded, ${dri% } open)"
     elif [[ -n $libs ]]; then
-        echo "WebRender/GL: unknown"
+        echo "WebRender: SOFTWARE? (Mesa loaded but no /dev/dri device open)"
     else
-        echo "WebRender/GL: SOFTWARE (no Mesa driver mapped: Firefox's own software WebRender)"
+        echo "WebRender: SOFTWARE (no Mesa driver: Firefox's own software WebRender)"
     fi
-    [[ -n $libs ]] && echo "Mapped: $(tr '\n' ' ' <<<"$libs")"
+    echo "Mapped: ${libs//$'\n'/ }"
+    echo "GPU device nodes open: ${dri:-none}"
+    # Where the browser process spends its CPU: Renderer/WRWorker near the
+    # top is software rendering; Compositor/WRRenderBackend is scene work.
+    echo "Busiest threads of the browser process (pid $main):"
+    top -H -b -w 200 -n 2 -d 1 -p "$main" 2>/dev/null \
+        | awk '/^ *PID/ {n++; next} n == 2 && NF >= 12 && $9 + 0 > 0 {c = $9; $1 = $2 = $3 = $4 = $5 = $6 = $7 = $8 = $9 = $10 = $11 = ""; sub(/^ +/, ""); printf "  %5.1f%%  %s\n", c, $0}' | head -8
 fi
 
 h "Player (/run/signage/perf.json)"
