@@ -138,3 +138,52 @@ def test_stream_session_relays_handshake(tmp_path, monkeypatch):
     assert [m["t"] for m in seen] == ["info", "offer", "connected", "ended"]
     assert seen[0]["cfg"]["quality"] == "720" and seen[0]["cfg"]["ice_servers"] == [{"urls": "stun:x"}]
     assert seen[2]["got"] == "v=0 answer"
+
+
+def test_control_socket_wakes_and_reconnects():
+    """The control socket sends the device's credentials, turns each wake
+    into a check-in, pings, and reconnects when the server drops it (as API
+    Gateway does after 2 hours)."""
+    agent = load_agent()
+    agent.Control.PING = 0.3
+    seen = {"connects": [], "pings": 0}
+
+    async def server(ws):
+        seen["connects"].append((ws.request.path, ws.request.headers.get("Authorization")))
+        if len(seen["connects"]) == 1:
+            await ws.send('{"t":"wake"}')
+            await ws.send("not json")
+            await ws.send('{"t":"wake"}')
+            # Answer pings for a while, then hang up.
+            for _ in range(2):
+                assert json.loads(await asyncio.wait_for(ws.recv(), 5)) == {"t": "ping"}
+                seen["pings"] += 1
+                await ws.send('{"t":"pong"}')
+            await ws.close()
+        else:
+            await ws.send('{"t":"wake"}')
+            await asyncio.sleep(5)
+
+    async def main(port_box, done):
+        async with websockets.serve(server, "127.0.0.1", 0) as srv:
+            port_box.append(srv.sockets[0].getsockname()[1])
+            await asyncio.get_running_loop().run_in_executor(None, done.wait, 20)
+
+    port_box, done = [], threading.Event()
+    threading.Thread(target=lambda: asyncio.run(main(port_box, done)), daemon=True).start()
+    while not port_box:
+        pass
+    wakes = []
+    ctl = agent.Control(lambda: wakes.append(len(seen["connects"])))
+    ctl.set_target(f"ws://127.0.0.1:{port_box[0]}/prod", "dev1", "tok1")
+    import time
+    deadline = time.time() + 15
+    while len(seen["connects"]) < 2 or wakes.count(2) < 2:
+        assert time.time() < deadline, (seen, wakes)
+        time.sleep(0.05)
+    done.set()
+    assert seen["connects"][0] == ("/prod?role=control", "Device dev1:tok1")
+    assert len(seen["connects"]) == 2 and seen["pings"] == 2
+    # A check-in on each connect, plus one per wake.
+    assert wakes.count(1) == 3 and wakes.count(2) == 2
+    assert ctl.connected

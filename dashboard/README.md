@@ -11,11 +11,19 @@ after:
 ```
  browser ──HTTPS──▶ API Gateway (HTTP API) ──▶ Lambda  app.py ──▶ DynamoDB (one table)
  player  ──HTTPS──▶        same URL          ─┘          │      └▶ S3 (packages, screenshots, images)
- browser ◀──WSS──▶ API Gateway (WebSocket) ──▶ Lambda  ws.py      (terminal relay)
- player  ◀──WSS──▶        same URL          ─┘
+ browser ◀──WSS──▶ API Gateway (WebSocket) ──▶ Lambda  ws.py      (terminal relay,
+ player  ◀──WSS──▶        same URL          ─┘                     control sockets)
                                                Lambda  mirror.py  (copies a GitHub release's image to S3)
  browser ◀═════ WebRTC (live view video, mouse and keyboard) ═════▶ player
 ```
+
+Each player also holds a *control socket* open on the WebSocket API. It
+carries no commands: when you queue a command, save a device's settings,
+assign or edit its program, or roll out a package version, the dashboard
+sends the device a one-line "wake" down it and the device checks in at
+once, so things land in well under a second instead of at the next poll.
+If the socket is down (old OS, network trouble, the dashboard's 2-hour
+connection limit), polling delivers everything as before.
 
 Live view's video doesn't go through AWS: the WebSocket relay only carries
 its handshake, then the browser and the player talk directly (or through an
@@ -154,12 +162,19 @@ month in API Gateway, Lambda and DynamoDB while powered on, and nothing while
 off. Install images take S3 storage (a few cents per release per month) and
 data transfer when downloaded. The interval is `POLL` in `src/app.py`.
 
+The control socket adds about 3 cents per player per month at list prices:
+$0.25 per million connection-minutes for the open connection (about 1.1
+cents), $1 per million messages for a ping and its pong every 5 minutes
+(about 1.7 cents), and a few hundredths of a cent of Lambda and DynamoDB
+for the pings. Wakes themselves are a message each.
+
 ## Using it
 
 - **Devices**: everything that has checked in. Green dot = checked in within
   a minute. *Clock* is the device clock minus the dashboard's, measured at
   check-in (so it includes network latency); the device page also shows
-  chrony's own offset and source. Select several to assign a program or
+  chrony's own offset and source; *instant* next to its status means it
+  holds a control socket, so commands reach it immediately. Select several to assign a program or
   reboot them together.
 - **Device page**: screenshot, terminal, restart player, re-sync content, OS
   update, reboot; settings; status; command history. Settings left blank
@@ -234,7 +249,8 @@ data transfer when downloaded. The interval is `POLL` in `src/app.py`.
   than installed with it, ffmpeg can't start); see *Live view through
   strict networks* if it can't connect.
 - **Terminal**: a root shell on the device, in the browser. The device opens
-  the connection when asked (within a few seconds while you have its page
+  the connection when asked (straight away with a control socket, otherwise
+  within a few seconds while you have its page
   open), so it works behind NAT. Close it with *Close* or `exit`.
 
 ### Uploading packages from a script
@@ -267,7 +283,8 @@ python3 scripts/dev_server.py --fake-release some-disk.raw   # also offer it on 
 ```
 
 The dev server runs the real Lambda code against moto (fake DynamoDB and
-S3). The terminal relay isn't emulated locally. `tests/test_agent_e2e.py`
+S3). The terminal relay and control sockets aren't emulated locally, so
+the agent falls back to polling there. `tests/test_agent_e2e.py`
 runs the real device agent against it and checks its overrides with the
 image's own `signage-config --check`. `tests/test_stream_e2e.py` runs live
 view end to end: `live.js` in Playwright's Chromium, a stand-in relay, and
@@ -288,7 +305,14 @@ root and:
    the wired MAC, so a reinstalled player keeps its settings), and keeps its
    device token in `/var/lib/signage/agent/identity.json`.
 2. Checks in (`POST /device/checkin`) with its status and the results of
-   commands it ran, and gets back settings, content and commands.
+   commands it ran, and gets back settings, content and commands. It
+   also opens the control socket (`?role=control` on the WebSocket URL the
+   check-in returns, with the same `Authorization: Device` header), checks
+   in at once on every `{"t":"wake"}`, pings every 5 minutes, treats 5½
+   minutes without a reply as a dead connection, and reconnects on its own
+   (straight away after the 2-hour limit, backing off to 2 minutes while
+   the dashboard is unreachable). Each reconnect also checks in, which
+   catches anything rung while it was away.
 3. Writes dashboard settings to `/var/lib/signage/overrides.toml` (after
    `signage-config --check` on the merged config), runs
    `signage-config --reload`, and restarts the player when display settings

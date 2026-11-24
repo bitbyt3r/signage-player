@@ -146,6 +146,14 @@ def exists_cond():
     return Attr("pk").exists()
 
 
+def forget_control(pk, conn):
+    """Clear a device's control socket (ws.py), unless it has already reconnected."""
+    try:
+        update(pk, "META", {}, remove=("ctl_conn",), condition=Attr("ctl_conn").eq(conn))
+    except table().meta.client.exceptions.ConditionalCheckFailedException:
+        pass
+
+
 # ------------------------------------------------------------------ admin auth
 
 def _secret():

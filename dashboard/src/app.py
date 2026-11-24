@@ -43,7 +43,7 @@ TURN_KEY_TOKEN = os.environ.get("TURN_KEY_TOKEN", "").strip()
 DEFAULT_ICE = [{"urls": ["stun:stun.cloudflare.com:3478", "stun:stun.l.google.com:19302"]}]
 STREAM_QUALITY = ("native", "1080", "720")
 
-POLL = 15          # normal check-in interval, seconds
+POLL = 15          # normal check-in interval, seconds (a control socket wakes it sooner)
 POLL_FAST = 3      # while someone has the device open in the dashboard
 ONLINE_GRACE = 60  # last check-in within this many seconds = online
 SESSION_TTL = 12 * 3600
@@ -258,6 +258,8 @@ def device_view(item, full=False):
         "notes": item.get("notes", ""),
         "last_seen": last,
         "online": c.now() - last <= ONLINE_GRACE,
+        # Holding a control socket: commands and changes reach it at once.
+        "instant": bool(item.get("ctl_conn")),
         "ip": item.get("ip", ""),
         "clock_offset": float(item.get("clock_offset", 0)),
         "os_version": status.get("os_version", ""),
@@ -326,6 +328,8 @@ def patch_device(req, did):
         changes["params"] = c.dumps(check_params(body["params"]))
     if changes:
         item = c.update(item["pk"], "META", changes)
+        if changes.keys() - {"notes"}:
+            ring(item)
     return resp(200, device_view(item, full=True))
 
 
@@ -341,9 +345,10 @@ def bulk_devices(req):
             pid = body["program_id"] or ""
             if pid and not c.get(f"PROGRAM#{pid}"):
                 raise HttpError(400, "no such program")
-            c.update(item["pk"], "META", {"program_id": pid})
+            item = c.update(item["pk"], "META", {"program_id": pid})
         if body.get("command"):
-            out.append(queue_command(did, body["command"], body.get("args") or {}))
+            out.append(queue_command(did, body["command"], body.get("args") or {}, notify=False))
+        ring(item)
     return resp(200, {"ok": True, "commands": out})
 
 
@@ -355,14 +360,53 @@ def delete_device(req, did):
     return resp(200, {"ok": True})
 
 
-def queue_command(did, ctype, args=None, ttl=3600):
+def queue_command(did, ctype, args=None, ttl=3600, notify=True):
     if ctype not in COMMANDS and ctype not in ("terminal", "stream"):
         raise HttpError(400, f"unknown command {ctype}")
     cid = f"{c.now_ms()}-{c.new_id(3)}"
     cmd = {"id": cid, "type": ctype, "args": args or {}, "state": "pending",
            "created": c.now(), "expires": c.now() + ttl}
     c.put({"pk": f"DEVICE#{did}", "sk": f"CMD#{cid}", "data": c.dumps(cmd), "ttl": c.now() + CMD_TTL})
+    if notify:
+        ring(c.get(f"DEVICE#{did}"))
     return cmd
+
+
+# ------------------------------------------------------------------ control sockets
+# A device holding a control socket (see ws.py) is told to check in now
+# whenever something changes for it, instead of waiting for its next poll.
+# Best effort: if the socket is gone the device still gets it by polling.
+
+_ws_api = None
+
+
+def ws_api():
+    global _ws_api
+    if _ws_api is None:
+        from botocore.config import Config
+        _ws_api = boto3.client("apigatewaymanagementapi", endpoint_url="https://" + WS_URL.split("://", 1)[-1],
+                               config=Config(connect_timeout=2, read_timeout=2, retries={"max_attempts": 1}))
+    return _ws_api
+
+
+def ring(*items):
+    """Wake these devices (DEVICE items) so they check in at once."""
+    for item in items:
+        conn = (item or {}).get("ctl_conn")
+        if not conn or not WS_URL:
+            continue
+        try:
+            ws_api().post_to_connection(ConnectionId=conn, Data=b'{"t":"wake"}')
+        except Exception as e:
+            if type(e).__name__ == "GoneException":
+                c.forget_control(item["pk"], conn)
+            else:
+                print(f"waking {item['id']} failed: {type(e).__name__}: {e}")
+
+
+def ring_where(pred):
+    """Wake every connected device the predicate picks."""
+    ring(*[i for i in c.by_kind("device") if i.get("ctl_conn") and pred(i)])
 
 
 @route("POST", "/api/devices/{did}/commands")
@@ -859,6 +903,7 @@ def put_program(req, pid):
     clean["id"] = pid
     clean["updated"] = c.now()
     c.put({"pk": f"PROGRAM#{pid}", "sk": "META", "kind": "program", "data": c.dumps(clean)})
+    ring_where(lambda i: i.get("program_id") == pid)
     return resp(200, clean)
 
 
@@ -967,6 +1012,7 @@ def package_import(req):
             if body.get("activate") and p.get("active_version") != version:
                 p["active_version"] = version
                 c.put({**meta, "data": c.dumps(p)})
+                ring_where(lambda i: True)
             return resp(200, {"id": pkg_id, "version": version, "unchanged": True, "active_version": p["active_version"]})
         raise HttpError(409, f"{pkg_id} {version} already exists with different contents; bump the version")
     c.s3().copy_object(Bucket=c.BUCKET, Key=f"packages/{pkg_id}/{version}.zip",
@@ -990,6 +1036,8 @@ def package_import(req):
     if body.get("activate"):
         p["active_version"] = version
     c.put({"pk": f"PKG#{pkg_id}", "sk": "META", "kind": "package", "data": c.dumps(p)})
+    if body.get("activate"):
+        ring_where(lambda i: True)
     return resp(200, {"id": pkg_id, "version": version, "active_version": p["active_version"]})
 
 
@@ -1005,6 +1053,8 @@ def package_patch(req, pkg):
             raise HttpError(400, "no such version")
         p["active_version"] = body["active_version"]
     c.put({"pk": f"PKG#{pkg}", "sk": "META", "kind": "package", "data": c.dumps(p)})
+    if "active_version" in body:
+        ring_where(lambda i: True)  # any program may use it
     return resp(200, p)
 
 
