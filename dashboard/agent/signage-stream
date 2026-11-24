@@ -354,6 +354,39 @@ def ice_config(webrtc, servers):
                 webrtc.emit("add-turn-server", uri)
 
 
+def with_profile(offer):
+    """Adds packetization-mode and profile-level-id to the H.264 fmtp, which
+    webrtcbin can leave out.
+    Without it the browser has to assume one (RFC 6184 says Baseline 1.0),
+    and some Chrome versions turn the video down. 42e01f is Constrained
+    Baseline, which both encoders produce; level-asymmetry-allowed lets the
+    stream use the higher level a 4K screen needs."""
+    text = offer.sdp.as_text()
+    lines = text.split("\r\n")
+    pts = {l.split()[0].split(":")[1] for l in lines if l.startswith("a=rtpmap:") and "H264/" in l}
+    has_fmtp = {l.split()[0].split(":")[1] for l in lines if l.startswith("a=fmtp:")}
+    out = []
+    for line in lines:
+        if line.startswith("a=fmtp:") and line.split()[0].split(":")[1] in pts:
+            if "packetization-mode" not in line:
+                line += ";packetization-mode=1"
+            if "profile-level-id" not in line:
+                line += ";profile-level-id=42e01f;level-asymmetry-allowed=1"
+        out.append(line)
+        if line.startswith("a=rtpmap:"):
+            pt = line.split()[0].split(":")[1]
+            if pt in pts and pt not in has_fmtp:
+                # No fmtp at all when the offer is made before the
+                # payloader's caps reach webrtcbin (the valve holds them).
+                out.append(f"a=fmtp:{pt} packetization-mode=1;profile-level-id=42e01f;level-asymmetry-allowed=1")
+    if not pts:
+        return offer
+    ok, msg = GstSdp.SDPMessage.new_from_text("\r\n".join(out))
+    if ok != GstSdp.SDPResult.OK:
+        return offer
+    return GstWebRTC.WebRTCSessionDescription.new(GstWebRTC.WebRTCSDPType.OFFER, msg)
+
+
 class Stream:
     def __init__(self, cfg):
         self.cfg = cfg
@@ -490,6 +523,7 @@ class Stream:
             err = reply.get_value("error") if reply and reply.has_field("error") else None
             GLib.idle_add(self.stop, f"couldn't create the offer: {err.message if err else reply}")
             return
+        offer = with_profile(offer)
         webrtc.emit("set-local-description", offer, Gst.Promise.new())
         GLib.timeout_add_seconds(GATHER_TIMEOUT, self.send_offer)
 
@@ -518,6 +552,10 @@ class Stream:
         if ok != GstSdp.SDPResult.OK:
             raise ValueError("bad SDP answer")
         self.answered = True
+        for i in range(msg.medias_len()):
+            m = msg.get_media(i)
+            if m.get_media() == "video" and m.get_port() == 0:
+                raise ValueError("the browser turned down the video (no H.264 it accepts)")
         answer = GstWebRTC.WebRTCSessionDescription.new(GstWebRTC.WebRTCSDPType.ANSWER, msg)
         self.webrtc.emit("set-remote-description", answer, Gst.Promise.new())
 

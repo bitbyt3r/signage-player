@@ -98,6 +98,7 @@ def test_live_view_in_browser(tmp_path, monkeypatch):
     agent = load_agent()
 
     from_device = []
+    from_admin = []
     results = {}
     conns = {}
 
@@ -118,8 +119,7 @@ def test_live_view_in_browser(tmp_path, monkeypatch):
             async for msg in ws:
                 if msg in ('{"t":"ping"}', '{"t":"hello"}'):
                     continue
-                if role == "device":
-                    from_device.append(json.loads(msg))
+                (from_device if role == "device" else from_admin).append(json.loads(msg))
                 if peer_role in conns:
                     await conns[peer_role].send(msg)
         finally:
@@ -153,7 +153,11 @@ def test_live_view_in_browser(tmp_path, monkeypatch):
                            capture_output=True, text=True, timeout=90)
     finally:
         httpd.shutdown()
-    assert r.returncode == 0, r.stderr[-3000:]
+    def sdp_lines(msgs, t):
+        sdp = next((m.get("sdp", "") for m in msgs if m.get("t") == t), "")
+        return [x for x in sdp.split("\r\n") if x.startswith(("m=", "a=fmtp", "a=group", "a=rtpmap"))]
+    assert r.returncode == 0, (r.stderr[-2500:], "offer:", sdp_lines(from_device, "offer"),
+                               "answer:", sdp_lines(from_admin, "answer"))
     got = json.loads(r.stdout.strip().splitlines()[-1])
     for _ in range(50):
         if "device" in results:
