@@ -1,0 +1,209 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MAGFest panel room</title>
+<!--
+  Panel room page for an Epiphan Pearl's Web Graphics input (see README.md).
+  Between panels: the room's schedule and a countdown to the next session.
+  During a panel: transparent, so the HDMI input under it shows through, or
+  the MAGFest logo when the page knows no video is coming in.
+
+  ?room=Panels 1          room name, short name or MAGSched location ID (required)
+  &status=/status         optional signal bridge (pearl-bridge.py); without it
+                          the Pearl's own "no signal" image on HDMI does the logo
+  &api=https://schedule.magfest.net
+  &assets=/packages/      where the theme art lives (git-ignored packages/)
+  &tz=America/New_York
+  &pre= &post= &mingap= &overrun= (minutes)  &early=1
+  &now=2027-01-08T15:58:00-05:00   pretend it's this time (testing)
+  &debug=1                show the mode and why in a corner
+-->
+<style>
+  :root { --gold: #E4BC60; --green: #2F9445; --dgreen: #0E5135; --brown: #301E12; --fg: #fff8ea; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+  body { font-family: "Noto Sans", system-ui, sans-serif; color: var(--fg); }
+  /* Everything is laid out on a 1920x1080 stage and scaled to the window. */
+  #stage { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  .mode { position: absolute; inset: 0; opacity: 0; transition: opacity .6s ease; pointer-events: none; }
+  body[data-mode="schedule"] #schedule, body[data-mode="logo"] #logo { opacity: 1; }
+  .bg { position: absolute; inset: 0; background: #1d1a17 center / cover no-repeat; }
+  .bg::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, #0008, #0003 30%, #0006); }
+
+  /* schedule */
+  header { position: absolute; left: 80px; right: 80px; top: 50px; height: 140px; display: flex; align-items: center; gap: 40px; }
+  header img { height: 130px; }
+  #room { font: 72px/1 Hylia, Georgia, serif; color: var(--gold); text-shadow: 0 4px 12px #000; flex: 1; }
+  #clock { font: 600 60px/1 "Noto Sans", system-ui, sans-serif; font-variant-numeric: tabular-nums; text-shadow: 0 3px 10px #000; }
+  #hero { position: absolute; left: 80px; right: 80px; top: 250px; height: 470px; padding: 40px 60px; box-sizing: border-box;
+          background: #301E12e0; border: 4px solid var(--gold); border-radius: 18px; box-shadow: 0 12px 40px #000a;
+          display: flex; flex-direction: column; justify-content: center; }
+  #hero .label { font: 600 40px/1 system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+  #title { font: 84px/1.08 Hylia, Georgia, serif; margin: 22px 0 26px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  #when { font: 600 48px/1 system-ui, sans-serif; color: #f1e3c6; }
+  #count { font: 700 150px/1 "Noto Sans", system-ui, sans-serif; font-variant-numeric: tabular-nums; color: var(--gold);
+           text-shadow: 0 6px 20px #000; position: absolute; right: 60px; bottom: 36px; }
+  #later { position: absolute; left: 80px; right: 80px; top: 770px; bottom: 60px; }
+  #later h2 { font: 600 34px/1 system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); margin: 0 0 18px; }
+  #later ol { list-style: none; margin: 0; padding: 0; }
+  #later li { display: flex; gap: 36px; font: 44px/1.45 system-ui, sans-serif; white-space: nowrap; text-shadow: 0 3px 8px #000; }
+  #later li time { width: 330px; flex: none; text-align: right; color: var(--gold); font-weight: 600; font-variant-numeric: tabular-nums; }
+  #later li span { overflow: hidden; text-overflow: ellipsis; }
+  #stale { position: absolute; right: 80px; bottom: 20px; font: 24px system-ui, sans-serif; color: #fff9; }
+
+  /* logo */
+  #logo .bg::after { background: radial-gradient(circle at 50% 45%, #0000, #000a 75%); }
+  #logo img { position: absolute; left: 50%; top: 46%; width: 1200px; transform: translate(-50%, -50%); filter: drop-shadow(0 14px 30px #000c); }
+  #logo p { position: absolute; left: 0; right: 0; top: 820px; text-align: center; font: 48px Hylia, Georgia, serif; color: var(--gold); text-shadow: 0 4px 12px #000; }
+
+  #debug { position: absolute; left: 10px; bottom: 10px; z-index: 9; font: 22px ui-monospace, monospace; background: #000c; color: #0f0; padding: 6px 10px; display: none; }
+  body.debug #debug { display: block; }
+</style>
+<div id="stage">
+  <section class="mode" id="schedule">
+    <div class="bg"></div>
+    <header><img id="hdrlogo" alt=""><div id="room"></div><div id="clock"></div></header>
+    <div id="hero">
+      <div class="label" id="label">Up next</div>
+      <div id="title"></div>
+      <div id="when"></div>
+      <div id="count"></div>
+    </div>
+    <div id="later"><h2>Later in this room</h2><ol id="list"></ol></div>
+    <div id="stale"></div>
+  </section>
+  <section class="mode" id="logo">
+    <div class="bg"></div>
+    <img id="biglogo" alt="MAGFest">
+    <p id="logoline"></p>
+  </section>
+</div>
+<div id="debug"></div>
+<script type="module">
+import { DEFAULTS, normalize, findRoom, roomSessions, decide, countdown, shortName } from "./room.mjs";
+
+const q = new URLSearchParams(location.search);
+const API = (q.get("api") || "https://schedule.magfest.net").replace(/\/+$/, "");
+const ASSETS = (q.get("assets") || "/packages/").replace(/\/?$/, "/");
+const TZ = q.get("tz") || "America/New_York";
+const STATUS = q.get("status") || "";
+const OPTS = Object.fromEntries(Object.keys(DEFAULTS).filter((k) => q.has(k)).map((k) =>
+    [k, typeof DEFAULTS[k] === "boolean" ? !/^(0|false|no)$/i.test(q.get(k)) : Number(q.get(k)) || 0]));
+const offset = q.get("now") ? Date.parse(q.get("now")) - Date.now() : 0;
+const now = () => Date.now() + (Number.isFinite(offset) ? offset : 0);
+const $ = (id) => document.getElementById(id);
+if (q.get("debug")) document.body.classList.add("debug");
+
+// Theme art from packages/ (git-ignored). If it's missing the page still
+// works, just plainer.
+const art = (p) => ASSETS + p;
+document.head.insertAdjacentHTML("beforeend", `<style>
+  @font-face { font-family: Hylia; src: url("${art("magfest-schedule/assets/HyliaSerifBeta-Regular.otf")}"); }
+  @font-face { font-family: "Noto Sans"; src: url("${art("magfest-schedule/assets/NotoSans-Variable.ttf")}"); font-weight: 100 900; }
+  .bg { background-image: url("${art("magfest-schedule/assets/background-crest-fabric.png")}"); }</style>`);
+$("hdrlogo").src = art("magfest-schedule/assets/logo-flat.png");
+$("biglogo").src = art("magfest-logo/assets/logo-main.png");
+for (const img of document.images) img.onerror = () => { img.style.visibility = "hidden"; };
+
+function fit() {
+    const s = Math.min(innerWidth / 1920, innerHeight / 1080);
+    $("stage").style.transform = `translate(${(innerWidth - 1920 * s) / 2}px, ${(innerHeight - 1080 * s) / 2}px) scale(${s})`;
+}
+addEventListener("resize", fit); fit();
+
+const fmtTime = new Intl.DateTimeFormat("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" });
+const fmtDay = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "long" });
+const dayKey = (t) => new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(t);
+const time = (t) => fmtTime.format(t);
+const fmtWk = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short" });
+const whenText = (t, long = true) => dayKey(t) === dayKey(now()) ? time(t) : `${(long ? fmtDay : fmtWk).format(t)} ${time(t)}`;
+
+// ---------------------------------------------------------- schedule data
+const CACHE = `pearl-room:v1:${API}`;
+let data = null, fetchedAt = 0, fetchError = "";
+try { const c = JSON.parse(localStorage.getItem(CACHE)); if (c?.data?.sessions) ({ data, fetchedAt } = c); } catch {}
+
+async function getJson(path) {
+    const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 30000);
+    try {
+        const r = await fetch(API + path, { cache: "no-store", signal: ctl.signal });
+        if (!r.ok) throw new Error(`${path.split("?")[0]}: HTTP ${r.status}`);
+        return await r.json();
+    } finally { clearTimeout(t); }
+}
+let fails = 0;
+async function refresh() {
+    try {
+        const [sessions, locations] = await Promise.all([getJson("/sessions?limit=-1"), getJson("/locations?limit=-1")]);
+        if (!Array.isArray(sessions) || !Array.isArray(locations)) throw new Error("unexpected response");
+        if (!sessions.length && data?.sessions?.length) throw new Error("server returned no sessions");
+        data = normalize(sessions, locations); fetchedAt = Date.now(); fetchError = ""; fails = 0;
+        try { localStorage.setItem(CACHE, JSON.stringify({ data, fetchedAt })); } catch {}
+    } catch (e) { fetchError = e.message || String(e); fails++; console.warn("[pearl-room] schedule refresh failed:", fetchError); }
+    setTimeout(refresh, fails ? Math.min(300, 15 * 2 ** (fails - 1)) * 1000 : 300000);
+    tick();
+}
+
+// ---------------------------------------------------------- signal bridge
+let signal = null, signalAt = 0;
+async function pollSignal() {
+    try {
+        const r = await fetch(STATUS, { cache: "no-store" });
+        const j = await r.json();
+        signal = typeof j.video === "boolean" ? j.video : null; signalAt = Date.now();
+    } catch { /* keep the last answer for a few seconds */ }
+    if (Date.now() - signalAt > 5000) signal = null;
+    setTimeout(pollSignal, 1000);
+}
+if (STATUS) pollSignal();
+
+// ---------------------------------------------------------- render
+let state = {};
+function setText(id, s) { const el = $(id); if (el.textContent !== s) el.textContent = s; }
+
+function tick() {
+    const t = now();
+    setText("clock", time(t));
+    const room = data && findRoom(q.get("room"), data.locations);
+    let mode = "schedule", reason = "", d = null;
+
+    if (!q.get("room")) { reason = "no ?room= set"; }
+    else if (!data) { reason = fetchError ? `schedule unavailable: ${fetchError}` : "loading schedule"; }
+    else if (!room) { reason = `room "${q.get("room")}" not on the schedule`; }
+    else {
+        d = decide({ sessions: roomSessions(data, room.id), now: t, signal, opts: OPTS, state });
+        state = d.state; mode = d.mode; reason = d.reason;
+    }
+    document.body.dataset.mode = mode;
+    setText("debug", `${mode}: ${reason} | signal ${signal} | ${new Date(t).toISOString()}`);
+    setText("room", room ? room.short : shortName(q.get("room") || "MAGFest"));
+    setText("logoline", room ? room.short : "");
+    setText("stale", fetchError && data ? `Schedule from ${whenText(fetchedAt)} (offline)` : "");
+
+    if (mode !== "schedule") return;
+    if (!d) {
+        setText("label", "MAGFest"); setText("title", reason); setText("when", ""); setText("count", "");
+        $("later").style.display = "none"; return;
+    }
+    const next = d.next;
+    if (!next) {
+        setText("label", "That's all"); setText("title", `Nothing more scheduled in ${room.short}`);
+        setText("when", "Check the schedule at schedule.magfest.net"); setText("count", "");
+    } else {
+        const ms = next.start - t;
+        setText("label", d.onNow ? "Up next" : ms < 60000 ? "Starting now" : "Up next");
+        setText("title", next.name);
+        setText("when", `${whenText(next.start)} – ${time(next.end)}`);
+        setText("count", countdown(ms) ?? "");
+    }
+    const later = d.upcoming.slice(next ? 1 : 0, 4);
+    $("later").style.display = later.length ? "" : "none";
+    const html = later.map((s) => `<li><time>${whenText(s.start, false)}</time><span></span></li>`).join("");
+    const list = $("list");
+    if (list.dataset.key !== later.map((s) => s.id + s.start).join()) {
+        list.innerHTML = html; list.dataset.key = later.map((s) => s.id + s.start).join();
+        [...list.querySelectorAll("span")].forEach((el, i) => { el.textContent = later[i].name; });
+    }
+}
+setInterval(tick, 250);
+refresh();
+</script>
