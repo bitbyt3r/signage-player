@@ -21,6 +21,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import socket
 import sys
 import threading
@@ -30,8 +31,14 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
-VERSION = "1"
+VERSION = "2"
 API = "/api/v2.0"
+# Same rule as the dashboard's: only Pearl API paths, whatever we're sent.
+PATH_RE = re.compile(r"^/(api/v2\.[0-9]+|admin)/[A-Za-z0-9._~/-]*$")
+METHODS = {"GET", "PUT", "PATCH", "POST", "DELETE"}
+# Keep each check-in well under the dashboard's 6 MB request limit; snapshots
+# that don't fit go at the next check-in.
+CHECKIN_BUDGET = 3_000_000
 
 
 def log(*a):
@@ -305,6 +312,9 @@ class Worker:
                     self.quick = self.pearl.quick()
                 if self.error:
                     log(f"{self.pearl.name}: reachable again")
+                    # The dashboard has it marked unreachable: send the next
+                    # snapshot even if nothing in it changed.
+                    self.sent_full = self.sent_quick = ("", 0)
                 self.error = None
                 self.gw.wake()
             except PearlError as e:
@@ -321,6 +331,8 @@ class Worker:
     def run_op(self, op):
         res = {"id": op["id"], "pearl": self.pearl.id}
         try:
+            if op.get("method", "GET") not in METHODS or not PATH_RE.match(op.get("path") or "") or ".." in op["path"]:
+                raise PearlError(f"refusing {op.get('method')} {op.get('path')}: not a Pearl API call")
             if op.get("kind") == "preview":
                 status, ctype, data = self.pearl.request("GET", op["path"], op.get("query"), raw=True, timeout=15)
                 if status != 200 or not ctype.startswith("image/"):
@@ -349,7 +361,10 @@ class Worker:
         return changed
 
     def report(self):
-        """What to send at this check-in, if anything."""
+        """What to send at this check-in, if anything. unreport() takes it
+        back if it doesn't go (too big for this check-in, or the check-in
+        failed), so it's sent next time."""
+        self._before = (self.sent_full, self.sent_quick)
         now = time.time()
         if self.error:
             return {"error": self.error}
@@ -366,6 +381,9 @@ class Worker:
                 return {"full": False, "data": self.quick}
         return None
 
+    def unreport(self):
+        self.sent_full, self.sent_quick = self._before
+
 
 class Gateway:
     def __init__(self, dashboard, gid, token):
@@ -377,6 +395,7 @@ class Gateway:
         self.lock = threading.Lock()
         self.event = threading.Event()
         self.poll = 10
+        self.seen_ops = {}   # op id -> when we got it; the dashboard may send one again
 
     def wake(self):
         self.event.set()
@@ -394,11 +413,23 @@ class Gateway:
         with self.lock:
             results, self.results = self.results, []
             frames, self.frames = self.frames, {}
-        snaps = {}
-        for pid, w in list(self.workers.items()):
+        snaps, size, reported = {}, 0, []
+        # Start with a different Pearl each time so none waits for ever.
+        order = list(self.workers.items())
+        if order:
+            k = int(time.time()) % len(order)
+            order = order[k:] + order[:k]
+        for pid, w in order:
             rep = w.report()
-            if rep:
-                snaps[pid] = rep
+            if not rep:
+                continue
+            n = len(json.dumps(rep))
+            if snaps and size + n > CHECKIN_BUDGET:
+                w.unreport()
+                self.event.set()   # check in again soon for the rest
+                continue
+            snaps[pid], size = rep, size + n
+            reported.append(w)
         body = {"version": VERSION, "local_ips": local_ips(), "results": results, "snapshots": snaps, "frames": frames}
         req = urllib.request.Request(self.url, data=json.dumps(body).encode(), method="POST",
                                      headers={"Authorization": self.auth, "Content-Type": "application/json",
@@ -411,9 +442,8 @@ class Gateway:
                 self.results = results + self.results
                 for pid, fr in frames.items():
                     self.frames.setdefault(pid, {}).update({k: v for k, v in fr.items() if k not in self.frames.get(pid, {})})
-            for w in self.workers.values():
-                w.sent_full = ("", 0)
-                w.sent_quick = ("", 0)
+            for w in reported:   # and these snapshots
+                w.unreport()
             raise
         self.poll = max(1, min(60, int(out.get("poll_interval") or 10)))
         seen = set()
@@ -441,7 +471,12 @@ class Gateway:
             log(f"no longer looking after {self.workers[pid].pearl.name}")
             self.workers.pop(pid).close()
         by_pearl = {}
+        now = time.time()
+        self.seen_ops = {k: t for k, t in self.seen_ops.items() if now - t < 3600}
         for op in out.get("ops") or []:
+            if op.get("id") in self.seen_ops:
+                continue   # sent again because our answer was slow; it's running or done
+            self.seen_ops[op.get("id")] = now
             by_pearl.setdefault(op.get("pearl"), []).append(op)
         for pid, ops in by_pearl.items():
             if pid in self.workers:

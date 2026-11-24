@@ -178,3 +178,51 @@ def test_multiview(aws):
     assert tiles["outputs/D1"]["label"] == "HDMI out (HDMI-A)"
     s, out = gw_call(gw, {})
     assert len(out["pearls"][0]["multiview"]["targets"]) == 4
+
+
+def test_multiview_viewers_merge(aws):
+    tok = login()
+    gw, p = setup(tok)
+    gw_call(gw, {"snapshots": {p["id"]: {"full": True, "data": SNAP}}})
+    call("POST", "/api/pearls/multiview", {"show": "inputs", "every": 10, "width": 320, "viewer": "a"}, token=tok)
+    call("POST", "/api/pearls/multiview", {"show": "outputs", "every": 5, "width": 640, "viewer": "b"}, token=tok)
+    # Each viewer still gets its own tiles...
+    s, d = call("POST", "/api/pearls/multiview", {"show": "inputs", "every": 10, "width": 320, "viewer": "a"}, token=tok)
+    assert [t["target"] for t in d["pearls"][0]["tiles"]] == ["inputs/hdmi-a", "inputs/WEBG1"]
+    # ...and the gateway serves both: every tile, fastest refresh, largest size.
+    s, out = gw_call(gw, {})
+    mv = out["pearls"][0]["multiview"]
+    assert [t["target"] for t in mv["targets"]] == ["inputs/hdmi-a", "inputs/WEBG1", "outputs/D1", "channels/1"]
+    assert mv["every"] == 5 and mv["width"] == 640
+    s, _ = call("POST", "/api/pearls/multiview", {"viewer": "no spaces"}, token=tok)
+    assert s == 400
+
+
+def test_summary_kept_on_the_pearl(aws):
+    import common
+    tok = login()
+    gw, p = setup(tok)
+    gw_call(gw, {"snapshots": {p["id"]: {"full": True, "data": SNAP}}})
+    status = {"input_status": {**SNAP["input_status"], "hdmi-a": {"video": {"state": "active", "resolution": "1920x1080"}}}}
+    gw_call(gw, {"snapshots": {p["id"]: {"full": False, "data": status}}})
+    item = common.get(f"PEARL#{p['id']}")
+    summ = json.loads(item["summary"])
+    assert summ["firmware"] == "4.24.7" and [i["signal"] for i in summ["inputs"]] == [True, True]
+    s, d = call("GET", "/api/pearls", token=tok)
+    assert d["pearls"][0]["summary"] == summ
+
+
+def test_lost_ops_are_sent_again(aws, monkeypatch):
+    import common
+    tok = login()
+    gw, p = setup(tok)
+    s, op = call("POST", f"/api/pearls/{p['id']}/ops", {"method": "GET", "path": "system/status"}, token=tok)
+    s, out = gw_call(gw, {})
+    assert [o["id"] for o in out["ops"]] == [op["id"]]
+    s, out = gw_call(gw, {})
+    assert out["ops"] == []
+    # No result 45 s later: the reply may have been lost, so it goes out again.
+    real = common.now
+    monkeypatch.setattr(common, "now", lambda: real() + 50)
+    s, out = gw_call(gw, {})
+    assert [o["id"] for o in out["ops"]] == [op["id"]]

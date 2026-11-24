@@ -210,12 +210,17 @@ export async function viewPearls() {
     try {
       const gw = await api("POST", "/api/gateways", { name });
       const cmd = `PEARL_GATEWAY_TOKEN=${gw.token} \\\n  python3 pearl-gateway --dashboard ${location.origin} --id ${gw.id}`;
+      const env = `PEARL_GATEWAY_DASHBOARD=${location.origin}\nPEARL_GATEWAY_ID=${gw.id}\nPEARL_GATEWAY_TOKEN=${gw.token}`;
       newGw.replaceChildren(h("div", { class: "panel inset" },
         h("p", {}, h("b", {}, "Copy this now: the token isn't shown again. "),
           "Run it on a machine on the same network as the Pearls (a signage player, a Pi, a laptop). ",
           h("a", { href: "/static/pearl-gateway", download: "pearl-gateway" }, "Download pearl-gateway"), " (Python 3, no dependencies)."),
         h("pre", { class: "mono", style: "white-space:pre-wrap;overflow-wrap:anywhere" }, cmd),
-        h("button", { class: "small", onclick: () => navigator.clipboard.writeText(cmd).then(() => toast("Copied")) }, "Copy")));
+        h("button", { class: "small", onclick: () => navigator.clipboard.writeText(cmd).then(() => toast("Copied")) }, "Copy"),
+        h("p", { class: "small" }, "To keep it running on a Linux machine, install ",
+          h("a", { href: "/static/pearl-gateway.service", download: "pearl-gateway.service" }, "pearl-gateway.service"),
+          " (instructions inside) with this as /etc/pearl-gateway.env:"),
+        h("pre", { class: "mono", style: "white-space:pre-wrap;overflow-wrap:anywhere" }, env)));
       await refresh();
     } catch (e) { toast(e.message); }
   }
@@ -332,8 +337,24 @@ const SECTIONS = [
   ["active", "Which layout is in use on each channel"],
   ["names", "Channel names"],
   ["outputs", "HDMI output settings (which channel it shows)"],
-  ["streams", "Stream settings (by channel and stream number)"],
+  ["streams", "Stream settings (by channel and stream number; each target keeps its own destination and key)"],
 ];
+
+// Where a stream goes and how it logs in. Copying these would send every
+// target to the source's stream, so each target keeps its own.
+const STREAM_DEST = new Set(["url", "stream", "key", "stream_key", "streamkey", "username", "user", "password",
+  "passphrase", "secret", "token", "stream_id", "streamid", "host", "port", "path", "app", "location"]);
+
+export function keepStreamDest(src, cur) {
+  if (Array.isArray(src)) return src.map((v, n) => keepStreamDest(v, Array.isArray(cur) ? cur[n] : undefined));
+  if (!src || typeof src !== "object") return src;
+  const out = {};
+  for (const [k, v] of Object.entries(src)) {
+    if (STREAM_DEST.has(k.toLowerCase())) { if (cur && typeof cur === "object" && k in cur) out[k] = cur[k]; }
+    else out[k] = keepStreamDest(v, cur && typeof cur === "object" ? cur[k] : undefined);
+  }
+  return out;
+}
 
 export function planCopy(src, dst, sections, dstId) {
   const ops = [], skipped = [];
@@ -378,7 +399,9 @@ export function planCopy(src, dst, sections, dstId) {
       for (const [pid, s] of Object.entries(src.publisher_settings?.[cid] || {})) {
         if (!s) continue;
         if (!(dst.publishers?.[cid] || []).some((x) => String(x.id) === pid)) { skipped.push(`channel ${cid} stream ${pid}`); continue; }
-        if (JSON.stringify(s) !== JSON.stringify(dst.publisher_settings?.[cid]?.[pid])) op("PUT", `/channels/${cid}/publishers/${pid}/settings`, s, `Channel ${cid} stream ${pid}`);
+        const cur = dst.publisher_settings?.[cid]?.[pid];
+        const next = keepStreamDest(s, cur);
+        if (JSON.stringify(next) !== JSON.stringify(cur)) op("PUT", `/channels/${cid}/publishers/${pid}/settings`, next, `Channel ${cid} stream ${pid}`);
       }
     }
   }
@@ -397,7 +420,7 @@ function copyDialog(pearls, ids) {
   const targets = pearls.filter((p) => ids.includes(p.id));
   const src = h("select", {}, pearls.filter((p) => p.snapshot_at).map((p) => h("option", { value: p.id, selected: !ids.includes(p.id) }, `${p.name}${p.room ? ` (${p.room})` : ""}`)));
   const boxes = SECTIONS.map(([k, label]) => h("label", { class: "check", style: "display:flex" },
-    h("input", { type: "checkbox", value: k, checked: k !== "graphics" && k !== "names" }), label));
+    h("input", { type: "checkbox", value: k, checked: !["graphics", "names", "streams"].includes(k) }), label));
   const plan = h("div", { class: "small" });
   let plans = [];
   async function makePlan() {
@@ -668,6 +691,8 @@ export async function viewMultiview() {
   const grid = h("div", { class: "mv-grid" });
   const note = h("span", { class: "muted small" });
   const tiles = new Map();   // pid|target -> {el, img, meta, at}
+  // One ID per open page: the server merges what every open multiviewer asks for.
+  const viewer = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
 
   const select = (key, options, label) => h("label", { class: "row small" }, label,
     h("select", { onchange: (e) => { prefs[key] = isNaN(+e.target.value) ? e.target.value : +e.target.value; save(); poll(); schedule(); } },
@@ -703,7 +728,7 @@ export async function viewMultiview() {
   }
 
   async function poll() {
-    const d = await api("POST", "/api/pearls/multiview", { show: prefs.show, every: prefs.every, width: prefs.width });
+    const d = await api("POST", "/api/pearls/multiview", { show: prefs.show, every: prefs.every, width: prefs.width, viewer });
     const seen = new Set();
     grid.replaceChildren(...d.pearls.map((p) => {
       p.tiles.forEach((t) => seen.add(`${p.id}|${t.target}`));

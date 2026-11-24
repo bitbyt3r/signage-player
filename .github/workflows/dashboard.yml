@@ -28,6 +28,11 @@ jobs:
           "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
           echo "NODE_PATH=$RUNNER_TEMP/pw/node_modules" >>"$GITHUB_ENV"
       - run: python -m pytest -q tests/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Pearl page and copy planner (node)
+        run: node --test tests/pearls_copy_test.mjs ../tests/pearl/room.test.mjs
       - name: FAT32 builder
         run: |
           sudo apt-get install -y dosfstools

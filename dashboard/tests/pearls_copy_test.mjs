@@ -52,3 +52,15 @@ test("layouts, active layout, names and outputs; missing ones are skipped", () =
   assert.deepEqual(skipped, ["channel 1 layout 2", "channel 3"]);
   assert.ok(ops.every((o) => o.pearl === "b"));
 });
+
+test("streams copy their settings but each target keeps its own destination and key", () => {
+  const pub = (url, key, bitrate) => ({ type: "rtmp", settings: { url, stream: key, username: "", password: "", bitrate } });
+  const src = snap({ publishers: { 1: [{ id: "1" }], 3: [] }, publisher_settings: { 1: { 1: pub("rtmp://a/live", "KEY-A", 6000) }, 3: {} } });
+  const dst = snap({ publishers: { 1: [{ id: "1" }], 3: [] }, publisher_settings: { 1: { 1: pub("rtmp://b/live", "KEY-B", 3000) }, 3: {} } });
+  const { ops } = planCopy(src, dst, ["streams"], "b");
+  assert.equal(ops.length, 1);
+  assert.deepEqual(ops[0].body.settings, { url: "rtmp://b/live", stream: "KEY-B", username: "", password: "", bitrate: 6000 });
+  // Only the destination differs: nothing to do.
+  const same = snap({ publishers: { 1: [{ id: "1" }], 3: [] }, publisher_settings: { 1: { 1: pub("rtmp://b/live", "KEY-B", 6000) }, 3: {} } });
+  assert.deepEqual(planCopy(src, same, ["streams"], "b").ops, []);
+});

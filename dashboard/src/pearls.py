@@ -24,6 +24,8 @@ SNAP_SLOW = 30      # seconds between full Pearl snapshots, normally
 SNAP_FAST = 5       # ... while someone is looking
 WATCH_SECS = 90
 OP_TTL = 300        # a queued op the gateway hasn't picked up by then expires
+OP_RESEND = 45      # a sent op with no result by then goes out again (the reply
+                    # carrying it may have been lost); the gateway skips repeats
 OP_KEEP = 3600      # done ops stay readable this long
 PREVIEW_TTL = 3600
 SNAPSHOT_MAX = 350_000
@@ -174,8 +176,17 @@ def load_snapshot(item):
     return {**out.get("SNAP#FULL", {}), **out.get("SNAP#STATUS", {})}
 
 
+def stored_summary(item):
+    """The fleet list's columns, kept on the Pearl's own item at each check-in
+    so listing Pearls doesn't read every full snapshot. Items written before
+    that existed fall back to the snapshot."""
+    if item.get("summary"):
+        return c.loads(item["summary"], {})
+    return summary(load_snapshot(item))
+
+
 def pearl_view(item, full=False):
-    snap = load_snapshot(item)
+    snap = load_snapshot(item) if full else None
     snap_at = int(item.get("snapshot_at", 0))
     gw = c.get(f"GATEWAY#{item['gateway_id']}") if item.get("gateway_id") else None
     gw_ok = bool(gw) and c.now() - int(gw.get("last_seen", 0)) <= ONLINE_GRACE
@@ -186,7 +197,7 @@ def pearl_view(item, full=False):
          "snapshot_at": snap_at, "error": item.get("error", ""),
          # Reachable: the gateway is up and got an answer from the Pearl recently.
          "online": gw_ok and not item.get("error") and c.now() - snap_at <= max(ONLINE_GRACE, SNAP_SLOW * 3),
-         "summary": summary(snap)}
+         "summary": summary(snap) if full else stored_summary(item)}
     if full:
         v["snapshot"] = snap
     return v
@@ -405,9 +416,17 @@ def gateway_checkin(req):
         if snap.get("full"):
             c.put({"pk": p["pk"], "sk": "SNAP#FULL", "data": raw, "at": now})
             c.delete(p["pk"], "SNAP#STATUS")   # the full one is newer
+            merged = data
         else:
             c.put({"pk": p["pk"], "sk": "SNAP#STATUS", "data": raw, "at": now})
-        p.update(c.update(p["pk"], "META", {"snapshot_at": now, "error": ""}))
+            full = c.get(p["pk"], "SNAP#FULL")
+            merged = {**c.loads((full or {}).get("data"), {}), **data}
+        # What the fleet list and multiviewer need, kept small on the Pearl's
+        # item so they don't read full snapshots on every poll.
+        p.update(c.update(p["pk"], "META", {
+            "snapshot_at": now, "error": "",
+            "summary": c.dumps(summary(merged)),
+            "mv_sources": c.dumps(mv_targets(merged, "both"))}))
 
     # Multiviewer frames uploaded since the last check-in: {pid: {target: time}}.
     for pid, fr in (body.get("frames") or {}).items():
@@ -448,7 +467,8 @@ def gateway_checkin(req):
             continue
         for x in c.query(p["pk"], "OP#"):
             rec = c.loads(x["data"])
-            if rec["state"] != "pending":
+            resend = rec["state"] == "sent" and int(rec.get("sent", 0)) < now - OP_RESEND
+            if rec["state"] != "pending" and not resend:
                 continue
             if rec["created"] < now - OP_TTL:
                 expire(p["pk"], x)
@@ -460,7 +480,7 @@ def gateway_checkin(req):
                 send["upload_url"] = c.s3().generate_presigned_url(
                     "put_object", Params={"Bucket": c.BUCKET, "Key": key, "ContentType": "image/jpeg"},
                     ExpiresIn=600)
-            rec.update(state="sent", sent=now)
+            rec.update(state="sent", sent=now, tries=int(rec.get("tries", 0)) + 1)
             c.update(p["pk"], x["sk"], {"data": c.dumps(rec)})
             ops.append(send)
     return resp(200, {"server_time": time.time(), "poll_interval": GW_POLL_FAST if fast or ops else GW_POLL,
@@ -477,6 +497,7 @@ MV_TTL = 45                 # keep streaming this long after the last poll
 MV_EVERY = (2, 5, 10, 30)
 MV_WIDTHS = (320, 480, 640, 960)
 MV_SHOW = ("inputs", "outputs", "both")
+MV_KINDS = {"inputs": ("input",), "outputs": ("output", "channel"), "both": ("input", "output", "channel")}
 
 
 def mv_targets(snap, show):
@@ -502,6 +523,20 @@ def mv_targets(snap, show):
     return out
 
 
+def mv_sources(item):
+    """[(target, label, kind)] the multiviewer can show for this Pearl, as
+    worked out at its last check-in (or from the snapshot, for old items)."""
+    if item.get("mv_sources") is not None:
+        return [tuple(x) for x in c.loads(item["mv_sources"], [])]
+    return mv_targets(load_snapshot(item), "both")
+
+
+def mv_viewers(item, now):
+    """The multiviewers open on this Pearl that haven't timed out: {viewer: conf}."""
+    conf = c.loads(item.get("mv"), {})
+    return {k: v for k, v in (conf.get("viewers") or {}).items() if int(v.get("until", 0)) > now}
+
+
 def mv_key(pid, target):
     return f"pearl-mv/{pid}/{target.replace('/', '_')}.jpg"
 
@@ -509,7 +544,8 @@ def mv_key(pid, target):
 @route("POST", "/api/pearls/multiview")
 def multiview(req):
     """Start or keep up a multiviewer and get its tiles.
-    {"pearls": [ids] (default all), "show": inputs|outputs|both, "every": s, "width": px}"""
+    {"pearls": [ids] (default all), "show": inputs|outputs|both, "every": s, "width": px,
+     "viewer": an ID per open page, so several people can watch with different settings}"""
     body = req.json()
     show = body.get("show", "both")
     if show not in MV_SHOW:
@@ -520,20 +556,26 @@ def multiview(req):
         raise HttpError(400, f"every: one of {MV_EVERY}")
     if width not in MV_WIDTHS:
         raise HttpError(400, f"width: one of {MV_WIDTHS}")
+    viewer = str(body.get("viewer") or "default")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", viewer):
+        raise HttpError(400, "viewer: letters, digits, - and _")
     want = body.get("pearls")
+    if want is not None and not isinstance(want, list):
+        raise HttpError(400, "pearls: a list of Pearl IDs")
     items = [p for p in c.by_kind("pearl") if not want or p["id"] in want]
     items.sort(key=lambda p: (p.get("room", "").lower(), p.get("name", "").lower()))
     now = c.now()
     pearls = []
     for item in items:
-        v = pearl_view(item, full=True)
-        snap = v.pop("snapshot")
-        targets = mv_targets(snap, show)
-        conf = {"targets": [t for t, _, _ in targets], "every": every, "width": width, "until": now + MV_TTL}
-        old = c.loads(item.get("mv"), {})
-        if {k: old.get(k) for k in ("targets", "every", "width")} != {k: conf[k] for k in ("targets", "every", "width")} \
+        v = pearl_view(item)
+        targets = [t for t in mv_sources(item) if t[2] in MV_KINDS[show]]
+        mine = {"targets": [t for t, _, _ in targets], "every": every, "width": width, "until": now + MV_TTL}
+        viewers = mv_viewers(item, now)
+        old = viewers.get(viewer) or {}
+        if {k: old.get(k) for k in ("targets", "every", "width")} != {k: mine[k] for k in ("targets", "every", "width")} \
                 or int(old.get("until", 0)) < now + MV_TTL - 15:
-            c.update(item["pk"], "META", {"mv": c.dumps(conf)})
+            viewers[viewer] = mine
+            c.update(item["pk"], "META", {"mv": c.dumps({"viewers": viewers})})
         frames = c.loads(item.get("mv_frames"), {})
         sigs = {i["id"]: i["signal"] for i in v["summary"].get("inputs", [])}
         tiles = []
@@ -551,11 +593,16 @@ def multiview(req):
 
 
 def mv_for_gateway(p, now):
-    """The multiviewer job for this Pearl's gateway, with upload URLs, or None."""
-    conf = c.loads(p.get("mv"), {})
-    if int(conf.get("until", 0)) <= now or not conf.get("targets"):
+    """The multiviewer job for this Pearl's gateway, with upload URLs, or None.
+    With several viewers open: every tile any of them shows, at the fastest
+    refresh and largest size any of them asked for."""
+    viewers = mv_viewers(p, now)
+    targets = list(dict.fromkeys(t for v in viewers.values() for t in v.get("targets") or []))
+    if not targets:
         return None
-    return {"every": conf["every"], "width": conf["width"], "until_in": int(conf["until"]) - now,
+    return {"every": min(int(v["every"]) for v in viewers.values()),
+            "width": max(int(v["width"]) for v in viewers.values()),
+            "until_in": max(int(v["until"]) for v in viewers.values()) - now,
             "targets": [{"target": t, "upload_url": c.s3().generate_presigned_url(
                 "put_object", Params={"Bucket": c.BUCKET, "Key": mv_key(p["id"], t), "ContentType": "image/jpeg"},
-                ExpiresIn=600)} for t in conf["targets"]]}
+                ExpiresIn=600)} for t in targets]}

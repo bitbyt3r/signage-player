@@ -292,6 +292,11 @@ Pearls' network (a signage player, a Pi, a laptop).
    PEARL_GATEWAY_TOKEN=pgw_... python3 pearl-gateway --dashboard https://dash.example --id 1a2b3c4d5e6f
    ```
 
+   To keep it running across reboots on a Linux machine, use
+   [`agent/pearl-gateway.service`](agent/pearl-gateway.service) (also a
+   download on the page); the install steps are at the top of the file and
+   the page shows the `/etc/pearl-gateway.env` to go with it.
+
 2. *Add Pearl*: its address (an IP, or its mDNS name such as
    `gsaa798666.local`, which follows it through DHCP), the admin password,
    its room as on the schedule, and the gateway.
@@ -308,8 +313,9 @@ only what changed, and runs the API calls you make in the dashboard
   shows, firmware and temperature. Select several for fleet operations:
   *Copy settings from…* another Pearl (by section: input settings, Graphics
   URLs, layout contents, which layout is in use, channel names, HDMI output,
-  stream settings; it shows what would change first, and skips anything the
-  target doesn't have, since the API can't create layouts or channels),
+  stream settings, where each target keeps its own stream URL and key; it
+  shows what would change first, and skips anything the target doesn't
+  have, since the API can't create layouts or channels),
   *Switch layout…* by name, *Set Graphics URL…* from a template (`{room}`,
   `{name}`, `{id}`), start or stop recording and streams, an API call on all
   of them, and reboot.
@@ -329,7 +335,9 @@ only what changed, and runs the API calls you make in the dashboard
   every 2, 5, 10 or 30 s at a choice of sizes; click one for a full-size
   frame. While it's open each gateway fetches the previews and uploads them
   straight to S3 (`pearl-mv/`, one object per tile, overwritten each time),
-  and it stops by itself within a minute of the page closing. Each tile
+  and it stops by itself within a minute of the page closing. Several
+  people can have it open with different settings: the gateway fetches
+  every tile any of them shows, at the fastest refresh any of them picked. Each tile
   costs the Pearl one preview encode per refresh, so use *Small* and a
   slower refresh for a big fleet.
 
@@ -452,5 +460,5 @@ shows nothing.
 - Pearl passwords are kept like saved WiFi passwords: in DynamoDB, sent only
   to the Pearl's gateway, never back to the browser. Gateway tokens are
   random and stored hashed. A gateway only calls `/api/` and `/admin/` paths
-  on the Pearls assigned to it. Anyone with the admin password can make any
+  on the Pearls assigned to it (the dashboard and the gateway both check). Anyone with the admin password can make any
   Pearl API call through the API console, including factory reset.
