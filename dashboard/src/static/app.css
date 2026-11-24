@@ -195,3 +195,10 @@ details.preview > summary { cursor: pointer; }
 .span-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .span-chip { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 10px; }
 .span-chip button { padding: 0 6px; }
+
+/* Pearls */
+.modal-box { width: min(1000px, 96vw); max-height: 92vh; overflow: auto; }
+.modal-box .pearl-preview { width: 100%; border-radius: 8px; background: #000; min-height: 120px; }
+textarea.json { min-height: 360px; }
+pre.result { background: var(--code); border-radius: 6px; padding: 8px; max-height: 420px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bulk { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }

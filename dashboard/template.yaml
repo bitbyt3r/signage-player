@@ -95,6 +95,7 @@ Resources:
           - { Id: screenshots, Status: Enabled, Prefix: screenshots/, ExpirationInDays: 14 }
           - { Id: uploads, Status: Enabled, Prefix: uploads/, ExpirationInDays: 1 }
           - { Id: device-files, Status: Enabled, Prefix: files/, ExpirationInDays: 14 }
+          - { Id: pearl-previews, Status: Enabled, Prefix: pearl-previews/, ExpirationInDays: 1 }
           - Id: incomplete-multipart
             Status: Enabled
             AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }

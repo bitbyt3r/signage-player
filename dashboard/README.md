@@ -273,6 +273,60 @@ dashboard/scripts/signage-upload --list
 comes from the manifest: bump it with every change, because changed files
 under an existing version are refused (identical files are a no-op).
 
+## Pearls
+
+Epiphan Pearls (the panel rooms' projector boxes) have their own page,
+**Pearls**. The dashboard can't reach a Pearl on a venue network and a Pearl
+can't run our agent, so a small **gateway** does it: `agent/pearl-gateway`,
+one Python 3 file with no dependencies, running on any machine on the
+Pearls' network (a signage player, a Pi, a laptop).
+
+```
+ browser ──▶ dashboard (Lambda) ◀──HTTPS check-in every 2–10 s── pearl-gateway ──HTTP──▶ Pearls
+```
+
+1. *Pearls → Add gateway*, name it, and copy the command it shows (the
+   token is shown once). Run it on the machine:
+
+   ```bash
+   PEARL_GATEWAY_TOKEN=pgw_... python3 pearl-gateway --dashboard https://dash.example --id 1a2b3c4d5e6f
+   ```
+
+2. *Add Pearl*: its address (an IP, or its mDNS name such as
+   `gsaa798666.local`, which follows it through DHCP), the admin password,
+   its room as on the schedule, and the gateway.
+
+The gateway reads each Pearl through the Pearl REST API: every 5 s a quick
+pass (signals, layouts in use, recording and streaming state, temperature)
+and every minute everything else (every input, layout, stream and output
+setting); every 2 s and 15 s while someone has the Pearl open. It reports
+only what changed, and runs the API calls you make in the dashboard
+("ops"), usually within 2 to 3 seconds.
+
+- **The list** shows each Pearl's inputs (with or without video), the
+  layout in use per channel, recording, streams, what the HDMI output
+  shows, firmware and temperature. Select several for fleet operations:
+  *Copy settings from…* another Pearl (by section: input settings, Graphics
+  URLs, layout contents, which layout is in use, channel names, HDMI output,
+  stream settings; it shows what would change first, and skips anything the
+  target doesn't have, since the API can't create layouts or channels),
+  *Switch layout…* by name, *Set Graphics URL…* from a template (`{room}`,
+  `{name}`, `{id}`), start or stop recording and streams, an API call on all
+  of them, and reboot.
+- **A Pearl's page**: every input with its signal and a live preview
+  frame, its settings (including the Graphics URL and no-signal image);
+  each channel's layouts (switch, preview, edit, with templates such as
+  "HDMI-A with Graphics 1 on top" for the panel room page), recording
+  (start, stop, list files), streams (start, stop, edit, add, delete),
+  renaming; the HDMI output's source; system status, storage, presets; reboot
+  and shut down. An **API console** reaches anything else the Pearl's API
+  does, including the older `/admin/get_params.cgi` and `set_params.cgi`.
+  *Pearl admin page* links to the Pearl itself, for what the API can't do
+  (creating layouts, uploading images, network settings); it only works from
+  a computer on the Pearl's network.
+
+The panel room page the Graphics input shows is in [`../pearl/`](../pearl/).
+
 ## Development
 
 ```bash
@@ -387,3 +441,8 @@ shows nothing.
   removed from the command history once the device has them.
 - Screenshots, packages and images are in a private bucket and reached
   through short-lived presigned URLs.
+- Pearl passwords are kept like saved WiFi passwords: in DynamoDB, sent only
+  to the Pearl's gateway, never back to the browser. Gateway tokens are
+  random and stored hashed. A gateway only calls `/api/` and `/admin/` paths
+  on the Pearls assigned to it. Anyone with the admin password can make any
+  Pearl API call through the API console, including factory reset.

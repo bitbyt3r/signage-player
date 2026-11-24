@@ -3,6 +3,7 @@ import { gzImageStream, imageStream, saveStream } from "./image.js";
 import { initParams, overrideForm, schemaForm, withOrder } from "./params.js";
 import { initLive, openLive } from "./live.js";
 import { initPerf, perfPanel } from "./perf.js";
+import { initPearls, viewPearl, viewPearls } from "./pearls.js";
 import { initPreview, previewPanel } from "./preview.js";
 import { bundledZips, listZip, readEntry } from "./zip.js";
 
@@ -12,6 +13,8 @@ initParams({ h, api });
 initPerf({ h, api });
 initLive({ h, api, toast });
 initPreview({ h, api });
+// (setView and every are hoisted function declarations too.)
+initPearls({ h, api, toast, setView, every, ago });
 let info = null;
 let timer = null;
 let cleanup = null;
@@ -1296,6 +1299,8 @@ async function router() {
     else if (page === "programs") await viewPrograms();
     else if (page === "packages") await viewPackages();
     else if (page === "images") await viewImages();
+    else if (page === "pearls" && id) await viewPearl(id);
+    else if (page === "pearls") await viewPearls();
     else await viewDevices();
   } catch (e) {
     if (e.message !== "log in again") setView(h("div", { class: "panel bad" }, e.message));
