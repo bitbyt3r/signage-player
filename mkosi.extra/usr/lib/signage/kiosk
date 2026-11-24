@@ -168,6 +168,11 @@ cat >"$HOME/firefox/user.js" <<PREFS
 // (radeonsi or llvmpipe); Firefox otherwise reports a generic family name
 // ("Radeon R9 200 Series, or similar") that says neither.
 user_pref("webgl.sanitize-unmasked-renderer", false);
+// Firefox counts every start that it doesn't see finish as a crash, and
+// after three it restarts itself in safe mode (no GPU acceleration, no
+// add-ons) until a start succeeds. A sign loses power or is restarted
+// mid-start often enough to trip that, so turn the count off.
+user_pref("toolkit.startup.max_resumed_crashes", -1);
 PREFS
 # The sign is powered off or rebooted without Firefox exiting cleanly, so
 # the profile always holds a "previous session". Drop it, or Firefox shows

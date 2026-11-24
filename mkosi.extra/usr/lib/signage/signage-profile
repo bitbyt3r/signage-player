@@ -37,6 +37,9 @@ firefox_main() {
     # The browser process: firefox-esr run by the kiosk, not a -contentproc child.
     local p
     for p in $(pgrep -u "$KUSER" -x firefox-esr); do
+        # Skip a zombie: when Firefox restarts itself the old process can
+        # linger unreaped, and it has no environ to read.
+        [[ $(cut -d' ' -f3 "/proc/$p/stat" 2>/dev/null) == Z ]] && continue
         tr '\0' ' ' <"/proc/$p/cmdline" 2>/dev/null | grep -q -- '-contentproc' || { echo "$p"; return 0; }
     done
     return 1
