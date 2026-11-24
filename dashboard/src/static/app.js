@@ -403,7 +403,8 @@ function statusPanel(dev, command) {
   const disp = (sum.display?.outputs || []).map((o) =>
     `${o.name}: ${o.current || "off"}${o.transform && o.transform !== "normal" ? ` rot ${o.transform}` : ""}`).join(", ");
   return h("dl", { class: "kv" },
-    h("dt", {}, "Status"), h("dd", {}, h("span", { class: `dot ${dev.online ? "on" : "off"}` }), dev.online ? "online" : "offline", ` · checked in ${ago(dev.last_seen)}`),
+    h("dt", {}, "Status"), h("dd", {}, h("span", { class: `dot ${dev.online ? "on" : "off"}` }), dev.online ? "online" : "offline", ` · checked in ${ago(dev.last_seen)}`,
+      dev.online && dev.instant ? h("span", { class: "muted", title: "Connected to the dashboard's WebSocket: commands and changes reach it immediately" }, " · instant") : ""),
     h("dt", {}, "Hostname"), h("dd", { class: "mono" }, dev.hostname),
     h("dt", {}, "OS version"), h("dd", { class: "mono" }, dev.os_version || "?"),
     updateInfo(dev) ? [h("dt", {}, "OS update"), h("dd", {}, updateBar(updateInfo(dev)))] : null,
@@ -483,7 +484,8 @@ async function viewDevice(id) {
     try {
       const cmd = await api("POST", `/api/devices/${id}/commands`, { type, args });
       if (type === "screenshot") lastShotCmd = cmd.id;
-      toast(dev.online ? `${type} sent; the device picks it up within a few seconds` : `${type} queued until the device checks in`);
+      toast(!dev.online ? `${type} queued until the device checks in`
+        : dev.instant ? `${type} sent` : `${type} sent; the device picks it up within a few seconds`);
       await refresh();
     } catch (e) { toast(e.message); }
   };

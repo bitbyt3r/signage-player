@@ -565,3 +565,79 @@ def test_stream_session(aws, monkeypatch):
     assert call("POST", f"/api/devices/{did}/stream", {}, token)[1]["ice_servers"][0]["urls"] == "turn:turn.example:3478"
     monkeypatch.setattr(app, "ICE_SERVERS", "not json")
     assert call("POST", f"/api/devices/{did}/stream", {}, token)[1]["ice_servers"] == app.DEFAULT_ICE
+
+
+def test_control_socket_wakes_device(aws, monkeypatch):
+    did, tok = enroll()
+    token = login()
+    ctx = {"domainName": "ws.example", "stage": "prod"}
+
+    def ev(route, conn, headers=None, body=None, role="control"):
+        e = {"requestContext": {**ctx, "routeKey": route, "connectionId": conn}}
+        if route == "$connect":
+            e["queryStringParameters"] = {"role": role}
+            e["headers"] = headers or {}
+        if body is not None:
+            e["body"] = body
+        return ws.handler(e)
+
+    # Only the device's own check-in credentials open a control socket.
+    assert ev("$connect", "x0")["statusCode"] == 403
+    assert ev("$connect", "x0", {"Authorization": f"Device {did}:wrong"})["statusCode"] == 403
+    assert ev("$connect", "x0", {"authorization": f"Device nosuch:{tok}"})["statusCode"] == 403
+    assert ev("$connect", "k1", {"Authorization": f"Device {did}:{tok}"})["statusCode"] == 200
+    s, d = call("GET", f"/api/devices/{did}", token=token)
+    assert d["instant"] is True
+
+    # Pings are answered so the device knows the connection is alive.
+    sent = []
+    monkeypatch.setattr(ws, "_send", lambda api, conn, msg: sent.append((conn, msg)) or True)
+    ev("$default", "k1", body='{"t":"ping"}')
+    assert sent == [("k1", {"t": "pong"})]
+
+    class GoneException(Exception):
+        pass
+
+    posts, gone = [], set()
+
+    class FakeApi:
+        def post_to_connection(self, ConnectionId, Data):
+            if ConnectionId in gone:
+                raise GoneException()
+            posts.append((ConnectionId, Data))
+
+    monkeypatch.setattr(app, "_ws_api", FakeApi())
+
+    # A command rings the device; the check-in it triggers carries it.
+    s, cmd = call("POST", f"/api/devices/{did}/commands", {"type": "reboot"}, token)
+    assert s == 200 and posts == [("k1", b'{"t":"wake"}')]
+    s, r = call("POST", "/device/checkin", {}, device=(did, tok))
+    assert [x["id"] for x in r["commands"]] == [cmd["id"]] and r["ws_url"] == "wss://ws.example/prod"
+    # Changes that alter what the device does ring it; notes don't.
+    call("PATCH", f"/api/devices/{did}", {"notes": "lobby"}, token)
+    assert len(posts) == 1
+    call("PATCH", f"/api/devices/{did}", {"program_id": ""}, token)
+    assert len(posts) == 2
+    call("POST", "/api/devices/bulk", {"ids": [did], "program_id": "", "command": "resync"}, token)
+    assert len(posts) == 3  # once per device, not once per change
+
+    # A reconnect replaces the connection; the old one's late $disconnect
+    # must not clear the new one.
+    assert ev("$connect", "k2", {"Authorization": f"Device {did}:{tok}"})["statusCode"] == 200
+    ev("$disconnect", "k1")
+    assert common.get(f"DEVICE#{did}")["ctl_conn"] == "k2"
+    # A connection API Gateway already dropped is forgotten when rung.
+    gone.add("k2")
+    call("POST", f"/api/devices/{did}/commands", {"type": "screenshot"}, token)
+    assert "ctl_conn" not in common.get(f"DEVICE#{did}")
+    s, d = call("GET", f"/api/devices/{did}", token=token)
+    assert d["instant"] is False
+    # And ringing a device without a socket does nothing.
+    call("POST", f"/api/devices/{did}/commands", {"type": "screenshot"}, token)
+    assert len(posts) == 3
+
+    # A disconnect after removal doesn't bring the device back.
+    assert ev("$connect", "k3", {"Authorization": f"Device {did}:{tok}"})["statusCode"] == 200
+    call("DELETE", f"/api/devices/{did}", token=token)
+    ev("$disconnect", "k3")
+    assert common.get(f"DEVICE#{did}") is None

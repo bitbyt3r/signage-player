@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Signage player dashboard (HTTP API + WebSocket terminal relay + DynamoDB + S3)
+Description: Signage player dashboard (HTTP API + WebSocket relay and device control sockets + DynamoDB + S3)
 
 Parameters:
   AdminPassword:
@@ -119,6 +119,11 @@ Resources:
         - DynamoDBCrudPolicy: { TableName: !Ref Table }
         - S3CrudPolicy: { BucketName: !Ref Bucket }
         - LambdaInvokePolicy: { FunctionName: !Ref MirrorFunction }
+        # Wakes devices through their control sockets (see src/ws.py).
+        - Statement:
+            - Effect: Allow
+              Action: execute-api:ManageConnections
+              Resource: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${WsApi}/*
       Events:
         Http:
           Type: HttpApi  # $default route: every path goes to this function
@@ -145,7 +150,7 @@ Resources:
       Qualifier: $LATEST
       MaximumRetryAttempts: 0
 
-  # ---------------------------------------------------------- terminal relay
+  # ------------------------------------- WebSocket: terminal/live view relay, device control sockets
 
   WsFunction:
     Type: AWS::Serverless::Function
