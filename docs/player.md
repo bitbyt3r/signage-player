@@ -346,6 +346,29 @@ Checked in Firefox ESR 153 headless with the demo program for 35 s:
 p50 16.7 ms, p99 at most 17.4 ms and no long frames. The first window
 listed the status screen's 8 ms before the demo lower third started.
 
+## Firefox settings
+
+The kiosk writes the player's Firefox prefs to `user.js` in its profile
+(`/var/lib/signage/home/firefox`) at every start:
+
+- `gfx.webrender.picture-tile-width` and `-height`: the size of the biggest
+  enabled screen (its mode, turned if the screen is rotated), from
+  `wlr-randr --json` after the display settings are applied. WebRender keeps
+  the page in tiles, 1024x512 by default (32 on a 4K screen), and draws
+  again each tile that changed. A full-screen graphic with anything moving
+  changes all of them every frame, and the per-tile work adds up: on an
+  M715q at 4K60 with magfest-logo, Firefox's main process took about 42% of
+  a core with the default tiles and about 24% with one tile the size of the
+  screen. If the kiosk can't read the screen size it writes the defaults.
+- `toolkit.startup.max_resumed_crashes = -1`: no automatic safe mode after
+  starts that were cut short.
+- `webgl.sanitize-unmasked-renderer = false`: so `perf.json` can name the
+  real renderer.
+
+When Firefox exits or crashes, the kiosk script ends with it (it logs
+`kiosk: Firefox exited (<code>)`), cage ends, and systemd starts
+`signage-player` again after 2 s.
+
 ## Profiling
 
 Two tools for the dashboard's web terminal (both run as root and are on
