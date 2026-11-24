@@ -147,6 +147,7 @@ def test_control_socket_wakes_and_reconnects():
     agent = load_agent()
     agent.Control.PING = 0.3
     seen = {"connects": [], "pings": 0}
+    port_box, done = [], threading.Event()
 
     async def server(ws):
         seen["connects"].append((ws.request.path, ws.request.headers.get("Authorization")))
@@ -162,28 +163,50 @@ def test_control_socket_wakes_and_reconnects():
             await ws.close()
         else:
             await ws.send('{"t":"wake"}')
-            await asyncio.sleep(5)
+            # Keep answering pings until the test is done, so a slow run
+            # doesn't see the agent time out and reconnect a third time.
+            while not done.is_set():
+                try:
+                    await asyncio.wait_for(ws.recv(), 0.1)
+                    await ws.send('{"t":"pong"}')
+                except asyncio.TimeoutError:
+                    pass
+                except websockets.ConnectionClosed:
+                    return
 
-    async def main(port_box, done):
+    async def main():
         async with websockets.serve(server, "127.0.0.1", 0) as srv:
             port_box.append(srv.sockets[0].getsockname()[1])
-            await asyncio.get_running_loop().run_in_executor(None, done.wait, 20)
+            await asyncio.get_running_loop().run_in_executor(None, done.wait, 30)
 
-    port_box, done = [], threading.Event()
-    threading.Thread(target=lambda: asyncio.run(main(port_box, done)), daemon=True).start()
+    threading.Thread(target=lambda: asyncio.run(main()), daemon=True).start()
     while not port_box:
         pass
+
+    # Number connections on the agent's side: the server's handler can start
+    # after the agent has already seen the handshake and fired its first wake.
+    opened = []
+
+    class CountingWebSocket(agent.WebSocket):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            opened.append(self)
+
+    agent.WebSocket = CountingWebSocket
     wakes = []
-    ctl = agent.Control(lambda: wakes.append(len(seen["connects"])))
+    ctl = agent.Control(lambda: wakes.append(len(opened)))
     ctl.set_target(f"ws://127.0.0.1:{port_box[0]}/prod", "dev1", "tok1")
     import time
-    deadline = time.time() + 15
-    while len(seen["connects"]) < 2 or wakes.count(2) < 2:
-        assert time.time() < deadline, (seen, wakes)
-        time.sleep(0.05)
-    done.set()
-    assert seen["connects"][0] == ("/prod?role=control", "Device dev1:tok1")
-    assert len(seen["connects"]) == 2 and seen["pings"] == 2
-    # A check-in on each connect, plus one per wake.
-    assert wakes.count(1) == 3 and wakes.count(2) == 2
-    assert ctl.connected
+    deadline = time.time() + 20
+    try:
+        while len(wakes) < 5:
+            assert time.time() < deadline, (seen, wakes)
+            time.sleep(0.05)
+        time.sleep(0.2)  # anything extra would show up now
+        assert seen["connects"][0] == ("/prod?role=control", "Device dev1:tok1")
+        assert len(seen["connects"]) == 2 and seen["pings"] >= 2
+        # A check-in on each connect, plus one per wake.
+        assert wakes == [1, 1, 1, 2, 2]
+        assert ctl.connected
+    finally:
+        done.set()
