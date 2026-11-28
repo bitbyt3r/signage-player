@@ -26,6 +26,22 @@ const log = (...a) => console.log("[player]", ...a);
 const warn = (...a) => console.warn("[player]", ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Seconds the current item plays for. A graphic can ask for its own length
+// (one pass through a list, say) with signageDuration(); that replaces a
+// timed item's duration. 0 (stay until replaced) is kept as it is.
+function itemDuration(cur) {
+    const dur = Number(cur.item.duration) || 0;
+    if (dur <= 0) return dur;
+    let want = 0;
+    for (const el of cur.els) {
+        try {
+            const s = Number(el.signageDuration?.());
+            if (Number.isFinite(s) && s > want) want = s;
+        } catch (e) { /* a broken hook falls back to the item's duration */ }
+    }
+    return want > 0 ? want : dur;
+}
+
 function withTimeout(promise, ms, what) {
     let t;
     return Promise.race([
@@ -189,7 +205,7 @@ class LayerRunner {
         const cur = this.current;
         if (cur) {
             const gone = cur.stale || !isEligible(cur.item, now);
-            const dur = Number(cur.item.duration) || 0;
+            const dur = itemDuration(cur);
             const expired = dur > 0 && Date.now() - cur.started >= dur * 1000;
             if (!gone && !expired) return;
             const i = this.nextEligible(this.index, now);

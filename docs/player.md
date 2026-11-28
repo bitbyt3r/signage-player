@@ -90,7 +90,12 @@ layer, `z-index` = `layer`. Each layer runs on its own:
   every second, so a window opening or closing takes effect within a
   second.
 - When an item's `duration` is up, the layer moves to the next eligible
-  item. If that is the same item (the only one eligible), the item keeps
+  item. The clock starts when `playAction()` resolves. A graphic can set
+  its own length by defining `signageDuration()`, which returns seconds
+  (for example one pass through a list of events). The player asks every
+  second, and a positive number replaces the item's `duration`. It is
+  ignored for items with `duration` 0, and `null`, 0 or an error falls back
+  to the item's `duration`. With several outputs, the longest wins. If that is the same item (the only one eligible), the item keeps
   running.
 - A layer with nothing eligible shows nothing (transparent).
 
