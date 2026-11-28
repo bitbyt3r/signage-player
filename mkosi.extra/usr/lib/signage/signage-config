@@ -105,6 +105,7 @@ def validate(cfg):
     # MokManager asks for this once, on the first boot after install, to
     # confirm enrolling the signing certificate. mokutil allows 1-256 chars.
     typed("install", "mok_password", str, lambda v: 1 <= len(v) <= 256, "must be 1 to 256 characters")
+    typed("install", "bios_settings", bool)
 
     wifi = cfg.get("network", {}).get("wifi", [])
     if not isinstance(wifi, list):

@@ -67,3 +67,9 @@ countdown = 15
 # screen appears: press a key, choose "Enroll MOK", "Continue", "Yes", type
 # this password, then "Reboot". See docs/secure-boot.md.
 mok_password = "signage"
+# Set the BIOS settings a sign wants once the disk is written (Lenovo
+# machines with think-lmi only; skipped where there's a BIOS supervisor
+# password). Power on after a power cut, wake on LAN, GPU memory, fans, no
+# boot prompts: the list is in /usr/lib/signage/signage-bios. It doesn't
+# touch Secure Boot or the boot order. false leaves the BIOS alone.
+bios_settings = true

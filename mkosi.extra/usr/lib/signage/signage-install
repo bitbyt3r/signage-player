@@ -104,11 +104,13 @@ cfg() { /usr/lib/signage/signage-config --get "$1" "$STAGE/state/config.toml"; }
 TARGET=$(cfg install.target || true)
 COUNTDOWN=$(cfg install.countdown || echo 15)
 MOK_PASSWORD=$(cfg install.mok_password || echo signage)
+BIOS_SETTINGS=$(cfg install.bios_settings || echo True)
 
 # BIOS probe (Lenovo ThinkCentre/ThinkPad): dump every WMI BIOS setting and
 # the BIOS password state to bios-<serial>.txt on the stick's SIGNCFG
 # partition. Read-only on the BIOS side; nothing is changed. Runs before the
-# countdown so booting the stick and cancelling still leaves a report.
+# countdown so booting the stick and cancelling still leaves a report (of
+# the settings as they were: bios_setup below changes them later).
 bios_report() {
     modprobe think-lmi 2>/dev/null || true
     local fa=/sys/class/firmware-attributes/thinklmi
@@ -369,6 +371,28 @@ efibootmgr -q -c -d "$TARGET" -p "$esp_num" -L "Signage" -l '\EFI\BOOT\BOOTX64.E
 
 new=$(efibootmgr | sed -n 's/^Boot\([0-9A-F]\{4\}\)\*\? Signage.*/\1/p' | head -n1)
 [[ -n $new ]] && efibootmgr -q -n "$new"
+
+# BIOS settings for a sign (power on after a power cut and so on: the list
+# and the reasons are in signage-bios). After the disk is written, so a
+# cancelled or failed install changes nothing, and never fatal: signage-bios
+# skips whatever this machine doesn't have or refuses. What it did is added
+# to the report on the stick.
+bios_setup() {
+    if [[ $BIOS_SETTINGS != True ]]; then
+        say "BIOS settings: left alone (install.bios_settings = false)."
+        return 0
+    fi
+    say "Checking BIOS settings..."
+    local log=$STAGE/bios-setup.txt report
+    /usr/lib/signage/signage-bios 2>&1 | tee "$log" || true
+    report=$(compgen -G "$STAGE/bios-*.txt" | grep -v bios-setup.txt | head -n1) || true
+    [[ -n $report && -s $log ]] || return 0
+    if mount -o rw "$SRC_CFG" "$CFG_MNT" 2>/dev/null; then
+        { echo; echo "## set by the installer"; cat "$log"; } >>"$CFG_MNT/$(basename "$report")" && sync
+        umount "$CFG_MNT"
+    fi
+}
+bios_setup || say "Setting BIOS settings failed (continuing)."
 
 sync
 # From here on the disk is complete: no failure may wipe it.

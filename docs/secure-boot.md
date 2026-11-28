@@ -108,9 +108,39 @@ The installer loads `think-lmi` (Lenovo's WMI BIOS settings driver). If
 `/sys/class/firmware-attributes/thinklmi` exists, it writes
 `bios-<serial>.txt` to the stick's SIGNCFG partition: model, BIOS version,
 the password state (`authentication/*`: is_enabled, role, mechanism) and
-every setting with its current and possible values. It changes nothing; the
-report is for deciding which settings to script later. Booting the stick and
-pressing a key to cancel the countdown still writes the report.
+every setting with its current and possible values, as they were before the
+install. Booting the stick and pressing a key to cancel the countdown still
+writes the report.
+
+### BIOS settings
+
+Once the disk is written, the installer runs `/usr/lib/signage/signage-bios`,
+which sets these through `think-lmi` (unless `install.bios_settings = false`
+in `config.toml`):
+
+| Setting | Value | Why |
+|---|---|---|
+| After Power Loss | Power On | starts again by itself when the power comes back |
+| Enhanced Power Saving Mode | Disabled | ErP mode stops power-on after a power cut and wake on LAN |
+| Wake on LAN | Primary | wake on LAN on, booting the normal sequence (Automatic tries the network first) |
+| UMA Frame Buffer Size | 512MB | the most GPU memory this BIOS offers |
+| CPB Mode | Auto | turbo left to the CPU |
+| ICE Performance Modes | Better Thermal Performance | fans favour cooling; Full Speed is constant noise and wear |
+| Configuration Change Detection, Chassis Intrusion Detection, Dust Shield Alert | Disabled | each can stop the boot at a prompt |
+
+The names and values are the M715q's (BIOS M1XKT45A). Each one is skipped,
+with a line saying so, when the machine has no such setting, the BIOS doesn't
+offer the value, or the write is refused; nothing is set on a machine without
+`think-lmi` or with a BIOS supervisor password. What it did is on screen and
+appended to `bios-<serial>.txt` under "set by the installer". Changes apply at
+the next boot (the installer reboots anyway).
+
+It leaves Secure Boot, the boot sequences, USB ports and passwords alone: a
+wrong value there can leave a sign that needs a keyboard to recover. Those
+stay the by-hand step above.
+
+On a running player: `signage-bios --dry-run` shows what it would change,
+`signage-bios` changes it.
 
 ## Troubleshooting
 
